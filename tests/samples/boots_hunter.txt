@@ -1,0 +1,25 @@
+Item Class: Boots
+Rarity: Magic
+Sapphire Fugitive Boots of Plunder
+--------
+Evasion Rating: 125
+Energy Shield: 36
+--------
+Requirements:
+Level: 70
+Dex: 56
+Int: 76
+--------
+Sockets: W-G-B-W 
+--------
+Item Level: 86
+--------
+{ Implicit Modifier — Chaos, Resistance }
++19(17-23)% to Chaos Resistance
+--------
+{ Prefix Modifier "Sapphire" (Tier: 9) — Mana }
++33(30-34) to maximum Mana
+{ Suffix Modifier "of Plunder" (Tier: 2) — Drop }
++7(6-10)% to Item Rarity
+--------
+Hunter Item

@@ -1,0 +1,6 @@
+mss
+pillow
+pynput
+pyperclip
+winocr
+sv-ttk

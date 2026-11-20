@@ -1,0 +1,13 @@
+Item Class: Jewels
+Rarity: Normal
+Small Cluster Jewel
+--------
+Requirements:
+Level: 54
+--------
+Item Level: 84
+--------
+Adds 3 Passive Skills (enchant)
+Added Small Passive Skills grant: 6% increased Mana Reservation Efficiency of Skills (enchant)
+--------
+Place into an allocated Small, Medium or Large Jewel Socket on the Passive Skill Tree. Added passives do not interact with jewel radiuses. Right click to remove from the Socket.
