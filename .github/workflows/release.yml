@@ -1,10 +1,13 @@
-# Выпуск: тег vX.Y.Z (= VERSION в updater.py) -> тесты ядра обновления -> GitHub Release
-# с текстом из раздела «## X.Y.Z» в CHANGELOG.md. Программа обновляется из последнего выпуска.
+# Выпуск: при пуше в main, если для VERSION из updater.py ещё нет выпуска vX.Y.Z, — тесты
+# обновления и GitHub Release (тег создаётся вместе с ним) с текстом из раздела «## X.Y.Z»
+# в CHANGELOG.md. Программа обновляется из последнего выпуска. Тег vX.Y.Z, запушенный руками, тоже работает.
 name: release
 
 on:
   push:
+    branches: [main]
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -17,22 +20,29 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Версия в updater.py совпадает с тегом
-        run: |
-          v=$(python -c "import updater; print(updater.VERSION)")
-          [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "updater.VERSION=$v, тег $GITHUB_REF_NAME"; exit 1; }
-      - name: Тесты обновления
-        run: python tests/test_updater.py
-      - name: Текст выпуска из CHANGELOG.md
-        run: |
-          v="${GITHUB_REF_NAME#v}"
-          awk -v h="## $v" '$0==h{f=1;next} /^## /{f=0} f' CHANGELOG.md > notes.md
-          [ -s notes.md ] || echo "Версия $v" > notes.md
-          cat notes.md
-      - name: Выпуск
+      - name: Версия
+        id: v
         env:
           GH_TOKEN: ${{ github.token }}
-        # выпуск мог быть уже создан через API (тогда тег появляется вместе с ним)
         run: |
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 && { echo "выпуск уже есть"; exit 0; }
-          gh release create "$GITHUB_REF_NAME" --title "PoE Craft Guard $GITHUB_REF_NAME" --notes-file notes.md
+          v=$(python -c "import updater; print(updater.VERSION)")
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "v$v" != "$GITHUB_REF_NAME" ]; then
+            echo "updater.VERSION=$v, тег $GITHUB_REF_NAME"; exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if gh release view "v$v" >/dev/null 2>&1; then
+            echo "выпуск v$v уже есть"; echo "skip=1" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Тесты обновления
+        if: steps.v.outputs.skip != '1'
+        run: python tests/test_updater.py
+      - name: Выпуск
+        if: steps.v.outputs.skip != '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ steps.v.outputs.version }}
+        run: |
+          awk -v h="## $V" '$0==h{f=1;next} /^## /{f=0} f' CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "Версия $V" > notes.md
+          cat notes.md
+          gh release create "v$V" --target "$GITHUB_SHA" --title "PoE Craft Guard v$V" --notes-file notes.md
