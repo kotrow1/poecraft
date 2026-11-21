@@ -430,6 +430,7 @@ class App:
     def __init__(self, root):
         self.root = root
         self.db = None
+        self.import_err = ("", 0.0)   # текст ошибки импорта и до какого времени её показывать
         self.selected = {}            # group_key -> tier
         self.rows = {}                # iid -> group_key
         self.settings = dict(DEFAULT_SETTINGS, **CONFIG["settings"])
@@ -483,8 +484,10 @@ class App:
                     w.bind("<Button-1>", lambda e, c=cmd: c())
                     w.configure(cursor="hand2")
             self.steps[key] = (t, d)
+        self.base_btn = ttk.Button(bar, text="⟳ Новая база", command=self.do_import)
+        self.base_btn.grid(row=0, column=4, sticky="ns", padx=(8, 0))
         gear = ttk.Button(bar, text="⚙ Настройки", command=self.open_settings)
-        gear.grid(row=0, column=4, sticky="ns", padx=(8, 0))
+        gear.grid(row=0, column=5, sticky="ns", padx=(8, 0))
 
     def set_step(self, key, done, detail, color=None):
         t, d = self.steps[key]
@@ -946,8 +949,10 @@ class App:
             ctx = parse_item_text(self.db, pyperclip.paste())
         except Exception as e:
             log(f"Импорт не удался: {e}")
-            self.set_step("base", False, "в буфере нет предмета — Ctrl+Alt+C в игре", RED)
+            # ошибку держим на плашке несколько секунд, иначе poll сразу затрёт её старой базой
+            self.import_err = ("не вышло — сначала Ctrl+Alt+C", time.time() + 6)
             return
+        self.import_err = ("", 0.0)
         S.ctx = ctx
         S.crop = None
         self.selected = {k: v for k, v in self.selected.items() if k in ctx.groups}
@@ -970,7 +975,14 @@ class App:
         _, S.inf_min, S.inf_max = next(o for o in INF_OPTIONS if o[0] == self.inf_count.get())
 
     def update_steps(self):
-        if S.ctx:
+        try:
+            self.base_btn.config(text=f"⟳ Новая база ({hk('import')})")
+        except tk.TclError:
+            pass
+        err, until = self.import_err
+        if err and time.time() < until:
+            self.set_step("base", False, err, RED)
+        elif S.ctx:
             inf = ", ".join(S.ctx.influences) or "без влияния"
             extra = S.ctx.enchant if S.ctx.enchant else inf
             self.set_step("base", True, f"{S.ctx.base_name} · ilvl {S.ctx.ilvl} · {extra}")
