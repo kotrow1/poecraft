@@ -7,7 +7,13 @@ have rolled. The program never clicks for you: you click every orb yourself, it 
 stops the extra clicks.
 
 ## Installation
-Just run `run.bat`. It will:
+**Easiest — `PoECraftGuard.exe`:** download it from the
+[releases](https://github.com/kotrow1/poecraft/releases/latest) page, put it in its own folder (`data` and
+`config.json` will appear next to it) and run it. No Python needed, it updates itself.
+Windows may show “Windows protected your PC” — “More info” → “Run anyway”
+(the program has no paid code signature).
+
+**Or from source** — run `run.bat`. It will:
 1. find Python, or install Python 3.12 if there is none (via winget or from python.org);
 2. install the required libraries;
 3. check the English Windows text recognition pack and offer to install it if it's missing
@@ -16,7 +22,14 @@ Just run `run.bat`. It will:
    After a new patch delete the `data` folder to download a fresh one.
 
 An internet connection is needed on the first run. If the game runs as administrator, run
-`run.bat` as administrator too, otherwise the program can't block clicks in the game.
+the program as administrator too, otherwise it can't block clicks in the game.
+
+## Russian game client
+Both English and Russian game clients are supported. The program detects the client language from the
+copied item (Ctrl+Alt+C) — mods are shown and recognized in the game's language. The first Russian item
+downloads the Russian data (~20 MB). Reading a Russian tooltip needs the Russian Windows text recognition
+pack — if it's missing, the program offers to install it.
+The program's own window language (“⚙ Settings” → “General”) is independent of the client language.
 
 ## How to use — 4 steps (shown at the top of the window, done steps turn green)
 1. **Base** — Ctrl+Alt+C on the item in game, then F7 (or the “⟳ New base” button).

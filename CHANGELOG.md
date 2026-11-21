@@ -2,6 +2,16 @@
 
 Раздел `## X.Y.Z` становится текстом выпуска на GitHub (его берёт `.github/workflows/release.yml`).
 
+## 1.3.0
+
+- Русский клиент игры: Ctrl+Alt+C, названия баз и моды на русском, распознавание подсказки (Windows OCR ru-RU).
+  Язык клиента определяется сам по скопированному предмету; русские данные докачиваются при первом
+  русском предмете. Нет русского пакета распознавания — программа предложит установить.
+  Russian game client support (item copy, mods, OCR) — detected automatically.
+- Программа одним файлом: PoECraftGuard.exe в выпуске (Python не нужен), обновляется сама.
+  Single-file PoECraftGuard.exe in the release, no Python needed, self-updating.
+- После обновления — кнопка «Перезапустить».
+
 ## 1.2.0
 
 - Английский интерфейс / English interface: «⚙ Настройки» → «Общие» → «Язык» (Russian / English).
