@@ -1,0 +1,35 @@
+# Выпуск: тег vX.Y.Z (= VERSION в updater.py) -> тесты ядра обновления -> GitHub Release
+# с текстом из раздела «## X.Y.Z» в CHANGELOG.md. Программа обновляется из последнего выпуска.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Версия в updater.py совпадает с тегом
+        run: |
+          v=$(python -c "import updater; print(updater.VERSION)")
+          [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "updater.VERSION=$v, тег $GITHUB_REF_NAME"; exit 1; }
+      - name: Тесты обновления
+        run: python tests/test_updater.py
+      - name: Текст выпуска из CHANGELOG.md
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v h="## $v" '$0==h{f=1;next} /^## /{f=0} f' CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "Версия $v" > notes.md
+          cat notes.md
+      - name: Выпуск
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "PoE Craft Guard $GITHUB_REF_NAME" --notes-file notes.md

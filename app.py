@@ -16,6 +16,7 @@ import queue
 import threading
 import time
 import tkinter as tk
+import webbrowser
 from tkinter import ttk
 
 try:
@@ -35,6 +36,7 @@ from PIL import Image, ImageChops, ImageOps
 from pynput import keyboard, mouse
 
 from moddb import ModDB, Requirement, check_rule, match_lines, parse_item_text
+import updater
 
 OCR_LANG = "en-US"
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
@@ -42,7 +44,8 @@ HOTKEY_NAMES = {"import": "Импорт", "calibrate": "Калибровка", "
 HOTKEYS = {"import": "f7", "calibrate": "f8", "arm": "f6", "test": "f10"}
 
 
-CONFIG = {"hotkeys": HOTKEYS, "settings": {}, "region": None, "presets": {}}
+CONFIG = {"hotkeys": HOTKEYS, "settings": {}, "region": None, "presets": {}, "update": {}}
+UPDATE_EVERY = 6 * 3600          # автопроверка обновлений не чаще, секунд
 
 
 def load_config():
@@ -52,7 +55,7 @@ def load_config():
     except (OSError, ValueError):
         return
     HOTKEYS.update(data.get("hotkeys", {}))
-    for k in ("settings", "presets"):
+    for k in ("settings", "presets", "update"):
         CONFIG[k] = data.get(k, {}) or {}
     CONFIG["region"] = data.get("region")
 
@@ -408,7 +411,8 @@ def worker():
 GREEN, AMBER, RED, GRAY = "#4caf50", "#f9a825", "#e53935", "#8a8a8a"
 INF_OPTIONS = [("любое", None, None), ("ровно 1", 1, 1), ("ровно 2", 2, 2), ("ровно 3", 3, 3),
                ("не меньше 1", 1, None), ("не меньше 2", 2, None), ("ни одного", 0, 0)]
-DEFAULT_SETTINGS = {"block_seconds": 6, "hold": False, "step": True, "shift_lock": True, "on_top": False}
+DEFAULT_SETTINGS = {"block_seconds": 6, "hold": False, "step": True, "shift_lock": True, "on_top": False,
+                    "auto_update": True}
 
 
 def fmt_chance(c):
@@ -434,7 +438,10 @@ class App:
         self.selected = {}            # group_key -> tier
         self.rows = {}                # iid -> group_key
         self.settings = dict(DEFAULT_SETTINGS, **CONFIG["settings"])
-        root.title("PoE Craft Guard")
+        root.title(f"PoE Craft Guard {updater.VERSION}")
+        self.upd_busy = ""            # "" / "check" / "install"
+        self.upd_info = None          # последний выпуск с GitHub (dict из updater.check)
+        self.about = None             # виджеты вкладки «О программе», пока окно настроек открыто
         root.geometry("1300x780")
         root.minsize(980, 620)
         if sv_ttk:
@@ -444,6 +451,8 @@ class App:
         style.configure("Step.TLabel", font=("Segoe UI", 11, "bold"))
         style.configure("Hint.TLabel", foreground=GRAY)
         style.configure("Head.TLabel", font=("Segoe UI", 12, "bold"))
+        style.configure("Title.TLabel", font=("Segoe UI", 15, "bold"))
+        style.configure("Link.TLabel", font=("Segoe UI", 10, "underline"), foreground="#64b5f6")
         root.attributes("-topmost", self.settings["on_top"])
 
         self.build_steps()
@@ -457,6 +466,7 @@ class App:
         self.build_target(right)
         self.build_bottom()
         self.make_overlay()
+        root.after(5000, self.auto_check)
         self.apply_settings()
 
         if CONFIG.get("region"):
@@ -825,8 +835,13 @@ class App:
         win.title("Настройки")
         win.transient(self.root)
         win.resizable(False, False)
-        f = ttk.Frame(win, padding=14)
-        f.pack(fill="both", expand=True)
+        nb = ttk.Notebook(win)
+        nb.pack(fill="both", expand=True, padx=8, pady=8)
+        f = ttk.Frame(nb, padding=14)
+        nb.add(f, text="Настройки")
+        about = ttk.Frame(nb, padding=14)
+        nb.add(about, text="О программе")
+        self.build_about(about)
         ttk.Label(f, text="Горячие клавиши", style="Head.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
         self.key_btns = {}
         r = 1
@@ -871,10 +886,153 @@ class App:
             save_config()
             self.apply_settings()
             UI_CAPTURE[0] = None
+            self.about = None
             win.destroy()
         ttk.Button(f, text="Готово", style="Accent.TButton", command=apply_and_close).grid(
             row=r, column=0, columnspan=2, sticky="ew", pady=(12, 0))
         win.protocol("WM_DELETE_WINDOW", apply_and_close)
+
+    # ======== о программе и обновления ========
+    def build_about(self, f):
+        f.columnconfigure(0, weight=1)
+        ttk.Label(f, text="PoE Craft Guard", style="Title.TLabel").grid(row=0, column=0, pady=(6, 0))
+        ttk.Label(f, text=f"Версия {updater.VERSION}").grid(row=1, column=0)
+        links = ttk.Frame(f)
+        links.grid(row=2, column=0, pady=(4, 12))
+        for i, (txt, url) in enumerate((("Что нового", updater.RELEASES_URL),
+                                        ("Сообщить об ошибке на GitHub", updater.ISSUES_URL))):
+            lb = ttk.Label(links, text=txt, style="Link.TLabel", cursor="hand2")
+            lb.grid(row=0, column=i, padx=8)
+            lb.bind("<Button-1>", lambda e, u=url: webbrowser.open(u))
+        box = ttk.Frame(f, style="Card.TFrame", padding=(14, 10))
+        box.grid(row=3, column=0, sticky="ew", padx=20)
+        box.columnconfigure(0, weight=1)
+        status = ttk.Label(box, text="", font=("Segoe UI", 10, "bold"), wraplength=380)
+        status.grid(row=0, column=0, sticky="w")
+        when = ttk.Label(box, text="", style="Hint.TLabel")
+        when.grid(row=1, column=0, sticky="w")
+        btn = ttk.Button(box, text="", command=self.update_button)
+        btn.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        auto = tk.BooleanVar(value=self.settings["auto_update"])
+
+        def toggle_auto():
+            self.settings["auto_update"] = auto.get()
+            CONFIG["settings"] = self.settings
+            save_config()
+        ttk.Checkbutton(f, text="Обновлять автоматически (проверка при запуске и раз в 6 часов)",
+                        variable=auto, command=toggle_auto).grid(row=4, column=0, pady=(10, 0))
+        f.rowconfigure(5, weight=1, minsize=40)
+        ttk.Label(f, text="Created by kotrow", style="Hint.TLabel").grid(row=6, column=0, sticky="s")
+        self.about = {"status": status, "when": when, "btn": btn}
+        self.refresh_about()
+
+    @staticmethod
+    def time_ago(ts):
+        if not ts:
+            return "никогда"
+        d = max(0, time.time() - ts)
+        if d < 60:
+            return "только что"
+        if d < 3600:
+            return f"{int(d // 60)} мин назад"
+        if d < 86400:
+            return f"{int(d // 3600)} ч назад"
+        return f"{int(d // 86400)} дн назад"
+
+    def update_state(self):
+        """(текст статуса, цвет, текст кнопки) для вкладки «О программе»."""
+        st = CONFIG["update"]
+        latest, installed = st.get("latest", ""), st.get("installed", "")
+        if self.upd_busy == "install":
+            return f"Устанавливаю версию {latest}...", AMBER, None
+        if self.upd_busy == "check":
+            return "Проверяю...", GRAY, None
+        if installed and updater.is_newer(installed):
+            return f"Версия {installed} установлена — перезапусти программу", GREEN, "Проверить сейчас"
+        if st.get("error"):
+            return f"Не удалось: {st['error']}", RED, "Проверить сейчас"
+        if latest and updater.is_newer(latest):
+            if updater.is_git_checkout():
+                return f"Доступна версия {latest} — папка из git, обнови через git pull", AMBER, "Проверить сейчас"
+            return f"Доступна версия {latest}", AMBER, f"Установить {latest}"
+        if latest:
+            return "Установлена последняя версия", None, "Проверить сейчас"
+        return "Обновления ещё не проверялись", None, "Проверить сейчас"
+
+    def refresh_about(self):
+        if not self.about:
+            return
+        text, color, btn = self.update_state()
+        try:
+            self.about["status"].configure(text=text, foreground=color or "")
+            self.about["when"].configure(
+                text="Последняя проверка: " + self.time_ago(CONFIG["update"].get("last_check")))
+            self.about["btn"].configure(text=btn or "Подождите...", state="normal" if btn else "disabled")
+        except tk.TclError:
+            self.about = None
+
+    def update_button(self):
+        st = CONFIG["update"]
+        latest = st.get("latest", "")
+        if (latest and updater.is_newer(latest) and st.get("installed") != latest
+                and not st.get("error") and not updater.is_git_checkout()):
+            self.install_update()
+        else:
+            self.check_updates()
+
+    def auto_check(self):
+        last = CONFIG["update"].get("last_check") or 0
+        if self.settings["auto_update"] and time.time() - last >= UPDATE_EVERY:
+            self.check_updates()
+        self.root.after(30 * 60 * 1000, self.auto_check)
+
+    def _bg(self, kind, fn):
+        def run():
+            try:
+                UI.put(("update", (kind, fn())))
+            except updater.UpdateError as e:
+                UI.put(("update", ("error", str(e))))
+            except Exception as e:
+                UI.put(("update", ("error", f"{type(e).__name__}: {e}")))
+        threading.Thread(target=run, daemon=True).start()
+
+    def check_updates(self):
+        if self.upd_busy:
+            return
+        self.upd_busy = "check"
+        self.refresh_about()
+        self._bg("checked", updater.check)
+
+    def install_update(self):
+        if self.upd_busy or not self.upd_info:
+            if not self.upd_info:
+                self.check_updates()
+            return
+        self.upd_busy = "install"
+        self.refresh_about()
+        info = self.upd_info
+        self._bg("installed", lambda: (updater.install(info), info["version"])[1])
+
+    def on_update(self, kind, data):
+        st = CONFIG["update"]
+        busy, self.upd_busy = self.upd_busy, ""
+        if kind == "checked":
+            self.upd_info = data
+            st.update(last_check=time.time(), latest=data["version"], error="")
+            if updater.is_newer(data["version"]) and st.get("installed") != data["version"]:
+                log(f"Доступна новая версия {data['version']} (сейчас {updater.VERSION})")
+                if self.settings["auto_update"] and not updater.is_git_checkout():
+                    save_config()
+                    self.install_update()
+                    return
+        elif kind == "installed":
+            st["installed"] = data
+            log(f"Обновлено до версии {data} — перезапусти программу, чтобы она заработала")
+        else:
+            st["error"] = data
+            log(("Обновление не установлено: " if busy == "install" else "Проверка обновлений: ") + data)
+        save_config()
+        self.refresh_about()
 
     def apply_settings(self):
         st = self.settings
@@ -1014,6 +1172,8 @@ class App:
                 self.do_import()
             elif kind == "roll":
                 self.show_roll(*data)
+            elif kind == "update":
+                self.on_update(*data)
             elif kind == "hit":
                 log("СОВПАЛО — левый клик заблокирован")
         self.update_steps()
