@@ -26,7 +26,7 @@ def test_versions():
 
 def test_install_keeps_user_files_and_blocks_bad_paths():
     top = "kotrow1-poecraft-abc123/"
-    blob = make_zip({top + "app.py": "new app", top + "moddb.py": "same", top + "updater.py": "u", top + "i18n.py": "i",
+    blob = make_zip({top + "app.py": "new app", top + "moddb.py": "same", top + "updater.py": "u", top + "i18n.py": "i", top + "paths.py": "p",
                      top + "tests/x.py": "t", top + "config.json": "{}", top + "data/mods.json": "[]",
                      top + "../evil.py": "x", top + "sub/../../evil2.py": "x"})
     with tempfile.TemporaryDirectory() as d:
@@ -35,7 +35,7 @@ def test_install_keeps_user_files_and_blocks_bad_paths():
                 f.write(data)
         n = updater.install_zip(blob, d, backup_name="1.0.0")
         read = lambda *p: open(os.path.join(d, *p)).read()
-        assert n == 4                                       # app.py, updater.py, i18n.py, tests/x.py
+        assert n == 5                                       # app.py, updater.py, i18n.py, paths.py, tests/x.py
         assert read("app.py") == "new app" and read("tests", "x.py") == "t"
         assert read("config.json") == "mine" and not os.path.exists(os.path.join(d, "data"))
         assert read("backup", "1.0.0", "app.py") == "old app"
@@ -52,6 +52,32 @@ def test_install_rejects_foreign_zip():
             assert "app.py" in str(e)
         else:
             raise AssertionError("чужой архив установлен")
+
+
+def test_install_exe_swaps_and_checks_hash():
+    import hashlib
+    new = b"MZ new build"
+    with tempfile.TemporaryDirectory() as d:
+        exe = os.path.join(d, "PoECraftGuard.exe")
+        with open(exe, "wb") as f:
+            f.write(b"MZ old build")
+        orig = updater._get
+        updater._get = lambda url, timeout, **kw: new
+        try:
+            info = {"exe": "x", "exe_sha256": hashlib.sha256(b"other").hexdigest()}
+            try:
+                updater.install_exe(info, exe)
+                raise AssertionError("неверная сумма пропущена")
+            except updater.UpdateError:
+                pass
+            assert open(exe, "rb").read() == b"MZ old build"
+            info["exe_sha256"] = hashlib.sha256(new).hexdigest()
+            updater.install_exe(info, exe)
+        finally:
+            updater._get = orig
+        assert open(exe, "rb").read() == new and open(exe + ".old", "rb").read() == b"MZ old build"
+        updater.cleanup_old_exe(exe)
+        assert not os.path.exists(exe + ".old")
 
 
 if __name__ == "__main__":

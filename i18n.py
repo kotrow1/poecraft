@@ -49,8 +49,16 @@ EN = {
     "ОХРАНА ВКЛЮЧЕНА": "GUARD ON",
     "Охрана выключена": "Guard off",
     # OCR
-    "в Windows не установлен пакет распознавания для английского (en-US)":
-        "the English (en-US) text recognition pack is not installed in Windows",
+    "в Windows не установлен пакет распознавания текста {lang}": "the Windows text recognition pack {lang} is not installed",
+    "Для распознавания подсказки нужен пакет распознавания текста Windows ({lang}).\n\n"
+    "Установить сейчас? Windows спросит права администратора. После установки перезапусти программу.":
+        "Reading the tooltip needs the Windows text recognition pack ({lang}).\n\n"
+        "Install it now? Windows will ask for administrator rights. Restart the program afterwards.",
+    "Устанавливаю пакет распознавания {lang} — после установки перезапусти программу":
+        "Installing the recognition pack {lang} — restart the program when it's done",
+    "Не удалось запустить установку: {e}": "Couldn't start the installation: {e}",
+    "Пакет можно поставить вручную: Параметры → Время и язык → Язык → добавить язык ({lang})":
+        "You can install the pack manually: Settings → Time & language → Language → add a language ({lang})",
     "Ошибка OCR: {e}": "OCR error: {e}",
     "Область сужена до подсказки: {w}x{h}": "Area narrowed to the tooltip: {w}x{h}",
     "[захват {a} + OCR {b} + разбор {c} = {d} мс]": "[capture {a} + OCR {b} + parse {c} = {d} ms]",
@@ -162,6 +170,8 @@ EN = {
     "Установлена последняя версия": "You have the latest version",
     "Обновления ещё не проверялись": "Updates haven't been checked yet",
     "Проверить сейчас": "Check now",
+    "Перезапустить": "Restart",
+    "Не удалось перезапустить: {e}": "Couldn't restart: {e}",
     "Подождите...": "Please wait...",
     "Доступна новая версия {v} (сейчас {cur})": "New version {v} is available (current {cur})",
     "Обновлено до версии {v} — перезапусти программу, чтобы она заработала":
@@ -179,6 +189,10 @@ EN = {
     "в архиве нет {files}": "the archive lacks {files}",
     "папка программы — клон git, обнови через git pull": "the program folder is a git clone, update with git pull",
     "архив выпуска слишком большой": "the release archive is too large",
+    "в выпуске нет {name}": "the release has no {name}",
+    "скачанный файл — не программа Windows": "the downloaded file is not a Windows program",
+    "скачанный файл повреждён (не совпала контрольная сумма)": "the downloaded file is damaged (checksum mismatch)",
+    "не удалось заменить программу: {e}": "couldn't replace the program: {e}",
     # база модов
     "База модов готова. Ctrl+Alt+C на предмете в игре → {key}.": "Mod database ready. Ctrl+Alt+C on an item in game → {key}.",
     "Не удалось загрузить базу: {e}": "Failed to load the mod database: {e}",

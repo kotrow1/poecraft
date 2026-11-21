@@ -1,6 +1,7 @@
-# Выпуск: при пуше в main, если для VERSION из updater.py ещё нет выпуска vX.Y.Z, — тесты
-# обновления и GitHub Release (тег создаётся вместе с ним) с текстом из раздела «## X.Y.Z»
-# в CHANGELOG.md. Программа обновляется из последнего выпуска. Тег vX.Y.Z, запушенный руками, тоже работает.
+# Сборка PoECraftGuard.exe (Windows, PyInstaller) при каждом пуше в main — проверка, что собирается
+# и запускается (--selftest). Выпуск: если для VERSION из updater.py ещё нет выпуска vX.Y.Z — тесты,
+# GitHub Release (тег создаётся вместе с ним) с текстом из раздела «## X.Y.Z» в CHANGELOG.md и exe.
+# Программа обновляется из последнего выпуска: из исходников — архивом тега, exe — файлом exe.
 name: release
 
 on:
@@ -13,8 +14,11 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  version:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      skip: ${{ steps.v.outputs.skip }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -30,21 +34,58 @@ jobs:
             echo "updater.VERSION=$v, тег $GITHUB_REF_NAME"; exit 1
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
-          if gh release view "v$v" >/dev/null 2>&1; then
+          if gh release view "v$v" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "выпуск v$v уже есть"; echo "skip=1" >> "$GITHUB_OUTPUT"
           fi
       - name: Тесты обновления и перевода
-        if: steps.v.outputs.skip != '1'
         run: |
           python tests/test_updater.py
           python tests/test_i18n.py
+
+  exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Зависимости
+        run: python -m pip install -r requirements.txt pyinstaller
+      - name: Сборка
+        run: >
+          pyinstaller --noconfirm --onefile --windowed --name PoECraftGuard
+          --collect-all winrt --collect-data sv_ttk
+          --hidden-import pynput.keyboard._win32 --hidden-import pynput.mouse._win32
+          app.py
+      - name: Самопроверка exe
+        shell: pwsh
+        run: |
+          $p = Start-Process dist\PoECraftGuard.exe -ArgumentList '--selftest' -Wait -PassThru
+          Get-Content dist\selftest.txt
+          if ($p.ExitCode -ne 0) { exit 1 }
+          Remove-Item dist\selftest.txt
+          (Get-Item dist\PoECraftGuard.exe).Length / 1MB
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PoECraftGuard
+          path: dist/PoECraftGuard.exe
+
+  release:
+    needs: [version, exe]
+    if: needs.version.outputs.skip != '1'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: PoECraftGuard
+          path: dist
       - name: Выпуск
-        if: steps.v.outputs.skip != '1'
         env:
           GH_TOKEN: ${{ github.token }}
-          V: ${{ steps.v.outputs.version }}
+          V: ${{ needs.version.outputs.version }}
         run: |
           awk -v h="## $V" '$0==h{f=1;next} /^## /{f=0} f' CHANGELOG.md > notes.md
           [ -s notes.md ] || echo "Версия $V" > notes.md
           cat notes.md
-          gh release create "v$V" --target "$GITHUB_SHA" --title "PoE Craft Guard v$V" --notes-file notes.md
+          gh release create "v$V" --target "$GITHUB_SHA" --title "PoE Craft Guard v$V" --notes-file notes.md dist/PoECraftGuard.exe

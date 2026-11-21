@@ -10,41 +10,62 @@ import urllib.request
 from dataclasses import dataclass, field
 
 from i18n import t
+from paths import APP_DIR
 
 DATA_URL = "https://raw.githubusercontent.com/repoe-fork/repoe-fork.github.io/master/data/"
 DATA_FILES = {"mods.json": "mods.json",
               "base_items.json": "base_items.json",
               "stat_translations.json": "stat_translations.json",
               "cluster_jewels.json": "cluster_jewels.json"}
+# язык клиента игры: ключ перевода в stat_translations и папка данных (английские файлы — в корне data/)
+GAME_LANGS = {"en": ("English", ""), "ru": ("Russian", "Russian/")}
+LANG_FILES = ("base_items.json", "stat_translations.json", "cluster_jewels.json", "item_classes.json")
 POOL_DOMAINS = {"item": ("item",), "affliction_jewel": ("affliction_jewel",)}
-DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+DATA_DIR = os.path.join(APP_DIR, "data")
+CYR = "А-Яа-яЁё"
 
 INFLUENCES = {  # суффикс тега в spawn_weights -> название
     "shaper": "Shaper", "elder": "Elder", "crusader": "Crusader",
     "eyrie": "Redeemer", "basilisk": "Hunter", "adjudicator": "Warlord",
 }
 INFLUENCE_BY_NAME = {v: k for k, v in INFLUENCES.items()}
+# русский клиент: строка «Предмет Создателя» и т. п. — по основе слова, окончания не важны
+INFLUENCE_RU = {"создател": "Shaper", "древн": "Elder", "крестонос": "Crusader",
+                "искупител": "Redeemer", "охотник": "Hunter", "вожд": "Warlord"}
 
-NUM_RE = re.compile(r"(?<![A-Za-z])[+-]?\d+(?:\.\d+)?(?![A-Za-z])")
+NUM_RE = re.compile(r"(?<![A-Za-zА-Яа-яЁё])[+-]?\d+(?:\.\d+)?(?![A-Za-zА-Яа-яЁё])")
 RANGE_RE = re.compile(r"\(\s*-?\d+(?:\.\d+)?\s*[-–]\s*-?\d+(?:\.\d+)?\s*\)")
 
 
+def _fetch(remote, path, log):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    log(t("Скачиваю {name} ...", name=remote))
+    tmp = path + ".part"
+    urllib.request.urlretrieve(DATA_URL + remote, tmp)
+    os.replace(tmp, path)                 # оборванная загрузка не оставит битый файл
+
+
 def download_data(force=False, log=print):
-    os.makedirs(DATA_DIR, exist_ok=True)
     for local, remote in DATA_FILES.items():
         path = os.path.join(DATA_DIR, local)
-        if os.path.exists(path) and not force:
-            continue
-        log(t("Скачиваю {name} ...", name=remote))
-        urllib.request.urlretrieve(DATA_URL + remote, path)
+        if force or not os.path.exists(path):
+            _fetch(remote, path, log)
+
+
+def download_lang(lang, force=False, log=print):
+    sub = GAME_LANGS[lang][1]
+    for name in LANG_FILES if sub else ():
+        path = os.path.join(DATA_DIR, *sub.strip("/").split("/"), name)
+        if force or not os.path.exists(path):
+            _fetch(sub + name, path, log)
 
 
 def skeleton(text):
     """Текст строки -> 'скелет' без чисел, для сравнения с шаблоном."""
-    s = text.lower().replace("\u2013", "-")
+    s = text.lower().replace("\u2013", "-").replace("ё", "е")
     s = RANGE_RE.sub("", s)
     s = NUM_RE.sub("#", s)
-    s = re.sub(r"[^a-z#% ]", " ", s)
+    s = re.sub(r"[^a-zа-я#% ]", " ", s)
     return re.sub(r"\s+", " ", s).strip()
 
 
@@ -115,6 +136,7 @@ class Mod:
 
 class ModDB:
     def __init__(self, log=print):
+        self.log = log
         download_data(log=log)
         log(t("Загружаю базу модов ..."))
         with open(os.path.join(DATA_DIR, "mods.json"), encoding="utf-8") as f:
@@ -128,25 +150,53 @@ class ModDB:
                 self.clusters = json.load(f)
         except OSError:
             self.clusters = {}
-        self.trans = {}
+        # по языкам клиента: переводы статов, названия баз, классы предметов, кластеры
+        self.trans = {"en": self._trans_index(st, "English")}
+        self.base_names = {"en": {k: b["name"] for k, b in self.bases.items()}}
+        self.class_names = {"en": {}}
+        self.lang_clusters = {"en": self.clusters}
+
+    @staticmethod
+    def _trans_index(st, key):
+        out = {}
         for e in st:
-            if not e.get("English"):
+            if not e.get(key):
                 continue
             for sid in e["ids"]:
-                self.trans.setdefault(sid, e)
+                out.setdefault(sid, e)
+        return out
+
+    def load_lang(self, lang):
+        """Данные для клиента на этом языке (русские — докачиваются при первом русском предмете)."""
+        if lang in self.trans:
+            return
+        key, sub = GAME_LANGS[lang]
+        download_lang(lang, log=self.log)
+        folder = os.path.join(DATA_DIR, *sub.strip("/").split("/"))
+        load = lambda name: json.load(open(os.path.join(folder, name), encoding="utf-8"))
+        bases, classes = load("base_items.json"), load("item_classes.json")
+        try:
+            clusters = load("cluster_jewels.json")
+        except OSError:
+            clusters = {}
+        self.base_names[lang] = {k: b.get("name", "") for k, b in bases.items() if k in self.bases}
+        self.class_names[lang] = {k: c.get("name", "") for k, c in classes.items()}
+        self.lang_clusters[lang] = clusters
+        self.trans[lang] = self._trans_index(load("stat_translations.json"), key)
 
     # ---------- шаблоны строк ----------
-    def mod_lines(self, stats):
-        """stats: [{'id','min','max'}] -> [LineTemplate]"""
+    def mod_lines(self, stats, lang="en"):
+        """stats: [{'id','min','max'}] -> [LineTemplate] на языке клиента"""
+        trans, key = self.trans[lang], GAME_LANGS[lang][0]
         vals = {s["id"]: (s["min"], s["max"]) for s in stats}
         out, seen = [], set()
         for s in stats:
-            e = self.trans.get(s["id"])
+            e = trans.get(s["id"])
             if e is None or id(e) in seen:
                 continue
             seen.add(id(e))
             ranges = [vals.get(i, (0, 0)) for i in e["ids"]]
-            variant = self._pick_variant(e["English"], ranges)
+            variant = self._pick_variant(e[key], ranges)
             if variant is None:
                 continue
             out.extend(self._render(variant, ranges))
@@ -216,50 +266,91 @@ class ItemContext:
     groups: dict          # group_key -> [Mod] (отсортированы по тиру)
     index: dict           # skel -> [(Mod, line_idx)]
     enchant: str = ""     # для кластеров: что дают малые пассивки
+    lang: str = "en"      # язык клиента игры (по тексту Ctrl+Alt+C): шаблоны строк и OCR
+
+
+def detect_game_lang(text):
+    head = "\n".join(text.replace("\r", "").split("\n")[:4])
+    return "ru" if re.search(f"[{CYR}]", head) else "en"
+
+
+def _influences(lines, lang):
+    found = []
+    for l in lines:
+        if lang == "en":
+            if l.endswith(" Item") and l.split()[0] in INFLUENCE_BY_NAME:
+                found.append(l.split()[0])
+        elif "предмет" in l.lower() and len(l.split()) <= 3:
+            low = l.lower()
+            found += [name for stem, name in INFLUENCE_RU.items() if stem in low]
+    return list(dict.fromkeys(found))
+
+
+def _norm_class(c):
+    return re.sub(r"(s|ы|и|а|я)$", "", (c or "").lower().strip())
 
 
 def parse_item_text(db, text):
-    """Текст из Ctrl+Alt+C -> ItemContext."""
+    """Текст из Ctrl+Alt+C (английский или русский клиент) -> ItemContext."""
     lines = [l.strip() for l in text.replace("\r", "").split("\n")]
-    item_class = next((l.split(":", 1)[1].strip() for l in lines if l.startswith("Item Class:")), "")
-    ilvl = next((int(l.split(":", 1)[1]) for l in lines if l.startswith("Item Level:")), 86)
-    influences = [l.split()[0] for l in lines if l.endswith(" Item") and l.split()[0] in INFLUENCE_BY_NAME]
+    lang = detect_game_lang(text)
+    db.load_lang(lang)
+
+    def field(*names):
+        return next((l.split(":", 1)[1].strip() for l in lines
+                     if any(l.startswith(n + ":") for n in names)), "")
+    item_class = field("Item Class", "Класс предмета")
+    lvl = re.search(r"\d+", field("Item Level", "Уровень предмета"))
+    ilvl = int(lvl.group()) if lvl else 86
+    influences = _influences(lines, lang)
     header = []
     for l in lines[1:]:
         if l.startswith("--------"):
             break
-        if not l.startswith("Rarity:"):
+        if not (l.startswith("Rarity:") or l.startswith("Редкость:")):
             header.append(l)
+    names = db.base_names[lang]
+    classes = None                       # подходящие классы (для русского — по названию класса)
+    if item_class and lang != "en":
+        classes = {k for k, n in db.class_names[lang].items() if _norm_class(n) == _norm_class(item_class)} or None
     best = None
-    norm = lambda c: (c or "").lower().rstrip("s")
     for k, b in db.bases.items():
         if b.get("domain") not in POOL_DOMAINS or b.get("release_state") != "released":
             continue
-        if item_class and norm(b.get("item_class")) != norm(item_class):
+        if item_class and lang == "en" and _norm_class(b.get("item_class")) != _norm_class(item_class):
             continue
-        if any(b["name"] in h for h in header):
-            if best is None or len(b["name"]) > len(best[1]["name"]):
-                best = (k, b)
+        if classes is not None and b.get("item_class") not in classes:
+            continue
+        name = names.get(k) or ""
+        if name and any(name.lower() in h.lower() for h in header):
+            if best is None or len(name) > len(best[2]):
+                best = (k, b, name)
     if best is None:
         raise ValueError(t("Не удалось определить базу предмета. Скопируй предмет через Ctrl+Alt+C."))
     extra_tags, enchant = [], ""
     cluster = db.clusters.get(best[0])
     if cluster:                                     # кластер: пул нотаблов зависит от энчанта
-        ench = next((l for l in lines if "Passive Skills grant:" in l), "")
-        ench = re.sub(r"\s*\(enchant\)\s*$", "", ench.split("grant:", 1)[-1]).strip()
-        for sk in cluster["passive_skills"]:
-            if any(skeleton(t) == skeleton(ench) for t in sk.get("stat_text", [])):
-                extra_tags.append(sk["tag"])
-                enchant = ench
+        local = db.lang_clusters[lang].get(best[0], cluster)
+        tag_of = {sk.get("id"): sk["tag"] for sk in cluster["passive_skills"]}
+        for l in lines:
+            ench = re.sub(r"\s*\((enchant|зачарование|энчант)\)\s*$", "", l).strip()
+            cands = {ench, ench.split(":", 1)[-1].strip()}
+            for sk in local["passive_skills"]:
+                if any(skeleton(x) == skeleton(c) for x in sk.get("stat_text", []) for c in cands if c):
+                    extra_tags.append(tag_of.get(sk.get("id"), sk.get("tag")))
+                    enchant = ench.split(":", 1)[-1].strip()
+                    break
+            if extra_tags:
                 break
         if not extra_tags:
             raise ValueError(t("Не удалось распознать энчант кластера. Скопируй его через Ctrl+Alt+C."))
-    ctx = build_context(db, best[1], ilvl, influences, extra_tags)
+    ctx = build_context(db, best[1], ilvl, influences, extra_tags, lang=lang, base_name=best[2])
     ctx.enchant = enchant
     return ctx
 
 
-def build_context(db, base, ilvl, influences, extra_tags=()):
+def build_context(db, base, ilvl, influences, extra_tags=(), lang="en", base_name=None):
+    db.load_lang(lang)
     tags = list(base["tags"]) + list(extra_tags)
     domains = POOL_DOMAINS.get(base.get("domain"), ("item",))
     for inf in influences:
@@ -282,7 +373,7 @@ def build_context(db, base, ilvl, influences, extra_tags=()):
         if tag_hit and "_" in tag_hit:
             inf = INFLUENCES.get(tag_hit.rsplit("_", 1)[1], "")
         mod = Mod(mid, m["name"], m["generation_type"], m["type"], m["required_level"],
-                  weight, inf, False, db.mod_lines(m["stats"]))
+                  weight, inf, False, db.mod_lines(m["stats"], lang))
         mod.spawnable = m["required_level"] <= ilvl
         mod.tags = [t for t in m.get("implicit_tags", []) if t != "influence_mod"]
         if mod.lines:
@@ -297,7 +388,7 @@ def build_context(db, base, ilvl, influences, extra_tags=()):
         if sib is None or not sib.influence:
             continue
         mod = Mod(mid, m["name"], m["generation_type"], m["type"], m["required_level"],
-                  0, sib.influence, True, db.mod_lines(m["stats"]))
+                  0, sib.influence, True, db.mod_lines(m["stats"], lang))
         mod.spawnable = m["required_level"] <= ilvl
         mod.tags = [t for t in m.get("implicit_tags", []) if t != "influence_mod"]
         if mod.lines:
@@ -328,10 +419,10 @@ def build_context(db, base, ilvl, influences, extra_tags=()):
     for imp in base.get("implicits", []):
         m = db.mods.get(imp)
         if m:
-            implicit_skels += [l.skel for l in db.mod_lines(m["stats"])]
+            implicit_skels += [l.skel for l in db.mod_lines(m["stats"], lang)]
 
-    return ItemContext(base["name"], base["item_class"], ilvl, influences, tags,
-                       implicit_skels, pool, groups, index)
+    return ItemContext(base_name or base["name"], base["item_class"], ilvl, influences, tags,
+                       implicit_skels, pool, groups, index, lang=lang)
 
 
 @dataclass

@@ -13,6 +13,7 @@ import ctypes
 import json
 import os
 import queue
+import sys
 import threading
 import time
 import tkinter as tk
@@ -38,10 +39,11 @@ from pynput import keyboard, mouse
 from moddb import ModDB, Requirement, check_rule, match_lines, parse_item_text
 import i18n
 import updater
+from paths import APP_DIR, FROZEN
 from i18n import t
 
-OCR_LANG = "en-US"
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+OCR_LANGS = {"en": "en-US", "ru": "ru-RU"}     # язык клиента игры -> пакет распознавания Windows
+CONFIG_PATH = os.path.join(APP_DIR, "config.json")
 HOTKEY_NAMES = {"import": "Импорт", "calibrate": "Калибровка", "arm": "Охрана вкл/выкл", "test": "Тест OCR"}
 HOTKEYS = {"import": "f7", "calibrate": "f8", "arm": "f6", "test": "f10"}
 
@@ -248,6 +250,20 @@ def prepare(img):
     return ImageOps.invert(ImageOps.autocontrast(g))
 
 
+class OcrPackMissing(RuntimeError):
+    def __init__(self, lang):
+        super().__init__(t("в Windows не установлен пакет распознавания текста {lang}", lang=lang))
+        self.lang = lang
+
+
+def install_ocr_pack(lang):
+    """Поставить пакет распознавания Windows (спросит права администратора). Только по согласию в окне."""
+    cmd = (f"Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile -Command "
+           f"Add-WindowsCapability -Online -Name Language.OCR~~~{lang}~0.0.1.0'")
+    import subprocess
+    subprocess.Popen(["powershell", "-NoProfile", "-Command", cmd], creationflags=0x08000000)
+
+
 class FastOCR:
     """Прямой вызов Windows OCR: движок создаётся один раз, без лишних преобразований."""
     def __init__(self, lang):
@@ -257,7 +273,7 @@ class FastOCR:
         from winrt.windows.storage.streams import DataWriter
         self.DataWriter, self.SoftwareBitmap, self.fmt = DataWriter, SoftwareBitmap, BitmapPixelFormat.RGBA8
         if not OcrEngine.is_language_supported(Language(lang)):
-            raise RuntimeError(t("в Windows не установлен пакет распознавания для английского (en-US)"))
+            raise OcrPackMissing(lang)
         self.engine = OcrEngine.try_create_from_language(Language(lang))
         self.loop = asyncio.new_event_loop()
 
@@ -282,18 +298,19 @@ class FastOCR:
         return out
 
 
-_OCR = [None]
+_OCR = {}       # язык Windows OCR -> FastOCR
 
 
-def ocr_lines(img):
+def ocr_lines(img, game_lang="en"):
     """img — исходный кадр. Возвращает [(текст, box в координатах кадра)]."""
     prepared = prepare(img)
+    lang = OCR_LANGS.get(game_lang, "en-US")
     try:
-        if _OCR[0] is None:
-            _OCR[0] = FastOCR(OCR_LANG)
-        raw = _OCR[0].lines(prepared)
+        if lang not in _OCR:
+            _OCR[lang] = FastOCR(lang)
+        raw = _OCR[lang].lines(prepared)
     except ImportError:                      # запасной путь через winocr
-        r = winocr.recognize_pil_sync(prepared, OCR_LANG)
+        r = winocr.recognize_pil_sync(prepared, lang)
         raw = [(l["text"], None) for l in r["lines"]]
     k = OCR_SCALE
     return [(t, None if b is None else (b[0] / k, b[1] / k, b[2] / k, b[3] / k)) for t, b in raw]
@@ -361,7 +378,12 @@ def worker():
         done_sig = sig
         t1 = time.perf_counter()
         try:
-            lines = ocr_lines(img)
+            lines = ocr_lines(img, S.ctx.lang)
+        except OcrPackMissing as e:
+            UI.put(("ocr_missing", e.lang))
+            S.armed = False
+            time.sleep(1)
+            continue
         except Exception as e:
             log(t("Ошибка OCR: {e}", e=e))
             time.sleep(1)
@@ -440,6 +462,7 @@ class App:
         self.root = root
         self.db = None
         self.import_err = ("", 0.0)   # текст ошибки импорта и до какого времени её показывать
+        self.ocr_asked = set()        # про какие пакеты OCR уже спросили
         self.selected = {}            # group_key -> tier
         self.rows = {}                # iid -> group_key
         self.settings = dict(DEFAULT_SETTINGS, **CONFIG["settings"])
@@ -1050,7 +1073,7 @@ class App:
         if self.upd_busy == "check":
             return t("Проверяю..."), GRAY, None
         if installed and updater.is_newer(installed):
-            return t("Версия {v} установлена — перезапусти программу", v=installed), GREEN, t("Проверить сейчас")
+            return t("Версия {v} установлена — перезапусти программу", v=installed), GREEN, t("Перезапустить")
         if st.get("error"):
             return t("Не удалось: {e}", e=st["error"]), RED, t("Проверить сейчас")
         if latest and updater.is_newer(latest):
@@ -1076,12 +1099,26 @@ class App:
 
     def update_button(self):
         st = CONFIG["update"]
+        if st.get("installed") and updater.is_newer(st["installed"]) and not self.upd_busy:
+            self.restart()
+            return
         latest = st.get("latest", "")
         if (latest and updater.is_newer(latest) and st.get("installed") != latest
                 and not st.get("error") and not updater.is_git_checkout()):
             self.install_update()
         else:
             self.check_updates()
+
+    def restart(self):
+        """Запустить программу заново (уже обновлённую) и закрыть эту копию."""
+        import subprocess
+        cmd = [sys.executable] if FROZEN else [sys.executable, os.path.join(APP_DIR, "app.py")]
+        try:
+            subprocess.Popen(cmd, cwd=APP_DIR)
+        except OSError as e:
+            log(t("Не удалось перезапустить: {e}", e=e))
+            return
+        quit_app(self.root)
 
     def auto_check(self):
         last = CONFIG["update"].get("last_check") or 0
@@ -1221,6 +1258,25 @@ class App:
         self.refresh_all()
         log(t("Импортирована база: {name}", name=ctx.base_name))
 
+    def ask_ocr_pack(self, lang):
+        if lang in self.ocr_asked:
+            return
+        self.ocr_asked.add(lang)
+        log(t("в Windows не установлен пакет распознавания текста {lang}", lang=lang))
+        from tkinter import messagebox
+        if messagebox.askyesno("PoE Craft Guard", t(
+                "Для распознавания подсказки нужен пакет распознавания текста Windows ({lang}).\n\n"
+                "Установить сейчас? Windows спросит права администратора. После установки перезапусти программу.",
+                lang=lang)):
+            try:
+                install_ocr_pack(lang)
+                log(t("Устанавливаю пакет распознавания {lang} — после установки перезапусти программу", lang=lang))
+            except Exception as e:
+                log(t("Не удалось запустить установку: {e}", e=e))
+        else:
+            log(t("Пакет можно поставить вручную: Параметры → Время и язык → Язык → добавить язык ({lang})",
+                  lang=lang))
+
     def toggle_guard(self):
         on_key_action("arm")
 
@@ -1278,6 +1334,8 @@ class App:
                 self.show_roll(*data)
             elif kind == "update":
                 self.on_update(*data)
+            elif kind == "ocr_missing":
+                self.ask_ocr_pack(data)
             elif kind == "hit":
                 log(t("СОВПАЛО — левый клик заблокирован"))
         self.update_steps()
@@ -1294,7 +1352,49 @@ class App:
         self.root.after(50, self.poll)
 
 
+def quit_app(root):
+    release_latch()
+    S.running = False
+    root.destroy()
+
+
+def selftest():
+    """PoECraftGuard.exe --selftest: собралось ли всё нужное (для CI). Пишет selftest.txt рядом с exe."""
+    import traceback
+    out, code = [f"PoE Craft Guard {updater.VERSION}, frozen={FROZEN}"], 0
+    try:
+        from pynput.keyboard import _win32  # noqa: F401
+        from pynput.mouse import _win32 as _m  # noqa: F401
+        from winrt.windows.globalization import Language
+        from winrt.windows.media.ocr import OcrEngine
+        out.append("winrt ok")
+        root = tk.Tk()
+        if sv_ttk:
+            sv_ttk.set_theme("dark")
+        out.append(f"tk ok, sv_ttk={'yes' if sv_ttk else 'no'}")
+        root.destroy()
+        for lang in OCR_LANGS.values():
+            out.append(f"OCR {lang}: {OcrEngine.is_language_supported(Language(lang))}")
+        try:                                     # настоящее распознавание картинки с текстом
+            from PIL import ImageDraw
+            img = Image.new("RGB", (900, 120), "black")
+            ImageDraw.Draw(img).text((20, 30), "35% increased Movement Speed", fill="white", font_size=40)
+            out.append("OCR read: " + " | ".join(x for x, _ in ocr_lines(img, "en")))
+        except Exception as e:
+            out.append(f"OCR read skipped: {e}")
+    except Exception:
+        out.append(traceback.format_exc())
+        code = 1
+    with open(os.path.join(APP_DIR, "selftest.txt"), "w", encoding="utf-8") as f:
+        f.write("\n".join(out) + "\n")
+    return code
+
+
 def main():
+    if "--selftest" in sys.argv:
+        sys.exit(selftest())
+    if FROZEN:
+        updater.cleanup_old_exe()
     load_config()
     i18n.set_lang(CONFIG["settings"].get("lang") or i18n.detect())
     root = tk.Tk()
@@ -1302,7 +1402,7 @@ def main():
     mouse_listener.start()
     kb_listener.start()
     threading.Thread(target=worker, daemon=True).start()
-    root.protocol("WM_DELETE_WINDOW", lambda: (release_latch(), setattr(S, "running", False), root.destroy()))
+    root.protocol("WM_DELETE_WINDOW", lambda: quit_app(root))
     root.mainloop()
 
 

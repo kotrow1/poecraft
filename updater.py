@@ -5,6 +5,7 @@
 исходников тега и раскладывает его поверх своей папки. data/ и config.json не трогаются,
 заменённые файлы складываются в backup/.
 """
+import hashlib
 import io
 import json
 import os
@@ -12,21 +13,24 @@ import re
 import shutil
 import urllib.error
 import urllib.request
+import sys
 import zipfile
 
 from i18n import t
+from paths import APP_DIR, FROZEN
 
 VERSION = "1.2.0"
 REPO = "kotrow1/poecraft"
 API_LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
 RELEASES_URL = f"https://github.com/{REPO}/releases"
 ISSUES_URL = f"https://github.com/{REPO}/issues/new"
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
+EXE_NAME = "PoECraftGuard.exe"                    # файл в выпуске для собранной версии
 # что в папке программы обновление не трогает: пользовательское и служебное
 KEEP = {"data", "config.json", "backup", ".git", "__pycache__"}
-REQUIRED = ("app.py", "moddb.py", "updater.py", "i18n.py")    # без них архив — не наш выпуск
+REQUIRED = ("app.py", "moddb.py", "updater.py", "i18n.py", "paths.py")    # без них архив — не наш выпуск
 HEADERS = {"User-Agent": "poecraft-updater", "Accept": "application/vnd.github+json"}
 MAX_ZIP = 20 * 1024 * 1024
+MAX_EXE = 200 * 1024 * 1024
 
 
 class UpdateError(Exception):
@@ -42,11 +46,11 @@ def is_newer(remote, local=None):
     return parse_version(remote) > parse_version(local or VERSION)
 
 
-def _get(url, timeout):
-    req = urllib.request.Request(url, headers=HEADERS)
+def _get(url, timeout, limit=MAX_ZIP, accept=None):
+    req = urllib.request.Request(url, headers=dict(HEADERS, **({"Accept": accept} if accept else {})))
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.read(MAX_ZIP + 1)
+            return r.read(limit + 1)
     except urllib.error.HTTPError as e:
         if e.code == 404:
             raise UpdateError(t("выпусков не найдено (репозиторий закрыт или выпусков ещё нет)"))
@@ -58,7 +62,7 @@ def _get(url, timeout):
 
 
 def check(timeout=10):
-    """Последний выпуск: {'version', 'tag', 'notes', 'url', 'zip'}."""
+    """Последний выпуск: {'version', 'tag', 'notes', 'url', 'zip', 'exe', 'exe_sha256'}."""
     try:
         data = json.loads(_get(API_LATEST, timeout))
     except ValueError:
@@ -66,8 +70,12 @@ def check(timeout=10):
     tag = data.get("tag_name") or ""
     if not tag or not data.get("zipball_url"):
         raise UpdateError(t("в выпуске нет тега или архива"))
+    exe = next((a for a in data.get("assets") or [] if a.get("name") == EXE_NAME), {})
+    digest = exe.get("digest") or ""
     return {"version": tag.lstrip("vV"), "tag": tag, "notes": data.get("body") or "",
-            "url": data.get("html_url") or RELEASES_URL, "zip": data["zipball_url"]}
+            "url": data.get("html_url") or RELEASES_URL, "zip": data["zipball_url"],
+            "exe": exe.get("browser_download_url", ""),
+            "exe_sha256": digest.split(":", 1)[1].lower() if digest.startswith("sha256:") else ""}
 
 
 def is_git_checkout(app_dir=APP_DIR):
@@ -125,7 +133,46 @@ def install_zip(blob, app_dir=APP_DIR, backup_name="prev"):
     return written
 
 
+def install_exe(info, exe_path=None, timeout=120):
+    """Собранная версия: скачать новый exe и поставить на место текущего. Работающий exe Windows
+    переименовать даёт: текущий -> .old (удаляется при следующем запуске), новый -> на его место."""
+    exe_path = exe_path or sys.executable
+    if not info.get("exe"):
+        raise UpdateError(t("в выпуске нет {name}", name=EXE_NAME))
+    blob = _get(info["exe"], timeout, limit=MAX_EXE, accept="application/octet-stream")
+    if len(blob) > MAX_EXE or not blob.startswith(b"MZ"):
+        raise UpdateError(t("скачанный файл — не программа Windows"))
+    if info.get("exe_sha256") and hashlib.sha256(blob).hexdigest() != info["exe_sha256"]:
+        raise UpdateError(t("скачанный файл повреждён (не совпала контрольная сумма)"))
+    new, old = exe_path + ".new", exe_path + ".old"
+    with open(new, "wb") as f:
+        f.write(blob)
+    try:
+        if os.path.exists(old):
+            os.remove(old)
+        os.replace(exe_path, old)
+        os.replace(new, exe_path)
+    except OSError as e:
+        if not os.path.exists(exe_path) and os.path.exists(old):
+            os.replace(old, exe_path)                 # вернуть как было
+        raise UpdateError(t("не удалось заменить программу: {e}", e=e))
+    return 1
+
+
+def cleanup_old_exe(exe_path=None):
+    """После обновления exe: убрать прежнюю копию (.old), когда она уже не запущена."""
+    exe_path = exe_path or sys.executable
+    for p in (exe_path + ".old", exe_path + ".new"):
+        try:
+            if os.path.exists(p):
+                os.remove(p)
+        except OSError:
+            pass
+
+
 def install(info, app_dir=APP_DIR, timeout=60):
+    if FROZEN:
+        return install_exe(info, timeout=timeout)
     if is_git_checkout(app_dir):
         raise UpdateError(t("папка программы — клон git, обнови через git pull"))
     blob = _get(info["zip"], timeout)

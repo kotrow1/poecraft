@@ -53,6 +53,22 @@ def test_cluster_enchant_pool_and_chance():
     assert got and "Purposeful Harbinger" in got[0].describe()
 
 
+def test_russian_client():
+    # синтетический образец (формат русского Ctrl+Alt+C — по аналогии с английским; сверить с настоящим)
+    ctx = parse_item_text(DB, sample("boots_ru_synthetic.txt"))
+    assert ctx.lang == "ru" and ctx.base_name == "Сапоги беглеца" and ctx.ilvl == 86
+    assert ctx.influences == ["Hunter", "Redeemer"]
+    got = [m.describe() for m in match_lines(ctx, [
+        "+19% к сопротивлению хаосу", "35% повышение скорости передвижения", "+33 к максимуму маны",
+        "+7% к редкости предметов",
+        "На вас действует Попутный ветер, если недавно вы наносили критическии удар",   # шум OCR: «и» вместо «й»
+        "15% увеличение эффекта Попутного ветра на вас"])]
+    assert "P T9: +33 к максимуму маны" in got and "S T2: +7% к редкости предметов" in got
+    assert "P T1: 35% повышение скорости передвижения" in got
+    assert not any("хаосу" in x for x in got)                                         # имплисит пропущен
+    assert any("ELEVATED" in x and "Попутный" in x for x in got), got
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
