@@ -32,4 +32,7 @@ jobs:
       - name: Выпуск
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --title "PoE Craft Guard $GITHUB_REF_NAME" --notes-file notes.md
+        # выпуск мог быть уже создан через API (тогда тег появляется вместе с ним)
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 && { echo "выпуск уже есть"; exit 0; }
+          gh release create "$GITHUB_REF_NAME" --title "PoE Craft Guard $GITHUB_REF_NAME" --notes-file notes.md
