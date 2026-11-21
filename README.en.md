@@ -1,10 +1,26 @@
 # PoE Craft Guard
 
-**[Русская версия](README.md)** · Program language — “⚙ Settings” → “General” → “Language”.
+**[Русская версия](README.md)**
 
-Watches the item tooltip on screen and **blocks the left click** once the mods you want
-have rolled. The program never clicks for you: you click every orb yourself, it only
-stops the extra clicks.
+**Never reroll a good item again.** Spam the orb — the program reads the item tooltip, and when the mods
+you picked roll, it beeps and **blocks the left click**.
+The program never clicks for you: you click every orb yourself, it only stops the extra click.
+
+![Demo: target is elevated Tailwind + Elusive; on a match the click is blocked](docs/demo-en.gif)
+
+### [⬇ Download PoECraftGuard.exe](https://github.com/kotrow1/poecraft/releases/latest/download/PoECraftGuard.exe)
+Windows 10/11 · free · no install · self-updating · [all releases](https://github.com/kotrow1/poecraft/releases)
+
+- **Any mods and tiers** — the base's mod list with chances and Harvest tags, “T3 or better”, all or any of
+  the selected, number of influenced mods (for Maven's Orb), elevated mods, cluster jewels (pool by enchant).
+- **Fast** — 40–50 ms per roll after the first recognition.
+- **Step mode** — the next click only goes through after the result is checked, no rerolling a good item by momentum.
+- **English and Russian game client**, interface in English and Russian.
+- **Doesn't touch the game** — no memory reading, no file changes, no key presses. Only the screen and the clipboard.
+- **Open source** — everything the program does is in this repository.
+
+> **Game rules.** We've sent a description of the program to Grinding Gear Games support and are waiting
+> for their answer. It will be published here word for word.
 
 ## Installation
 **Easiest — `PoECraftGuard.exe`:** download it from the
