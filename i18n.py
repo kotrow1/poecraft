@@ -202,6 +202,10 @@ EN = {
     "СОВПАЛО — левый клик заблокирован": "MATCH — left click blocked",
     "Скачиваю {name} ...": "Downloading {name} ...",
     "Загружаю базу модов ...": "Loading mod database ...",
+    "Не удалось проверить обновление базы модов ({e}) — работаю на сохранённой":
+        "Couldn't check for a mod database update ({e}) — using the saved one",
+    "База модов в RePoE обновилась — скачиваю свежую": "The mod database on RePoE has been updated — downloading the fresh one",
+    "База модов обновлена": "Mod database updated",
     "Не удалось определить базу предмета. Скопируй предмет через Ctrl+Alt+C.":
         "Couldn't identify the item base. Copy the item with Ctrl+Alt+C.",
     "Не удалось распознать энчант кластера. Скопируй его через Ctrl+Alt+C.":

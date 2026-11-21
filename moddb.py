@@ -60,6 +60,47 @@ def download_lang(lang, force=False, log=print):
             _fetch(sub + name, path, log)
 
 
+def remote_version(timeout=10):
+    """Отпечаток текущей выгрузки RePoE: ETag mods.json (меняется вместе с данными под патч)."""
+    req = urllib.request.Request(DATA_URL + "mods.json", method="HEAD",
+                                 headers={"User-Agent": "poecraft-data"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return (r.headers.get("ETag") or r.headers.get("Last-Modified") or "").strip()
+
+
+def refresh_data(log=print):
+    """При запуске: вышла новая выгрузка RePoE (патч) — скачать базу заново, включая уже скачанные
+    языки клиента. Нет связи — работаем на сохранённой базе. Возвращает True, если база обновилась."""
+    meta_path = os.path.join(DATA_DIR, "meta.json")
+    try:
+        with open(meta_path, encoding="utf-8") as f:
+            meta = json.load(f)
+    except (OSError, ValueError):
+        meta = {}
+    have = all(os.path.exists(os.path.join(DATA_DIR, n)) for n in DATA_FILES)
+    try:
+        version = remote_version()
+    except Exception as e:
+        if not have:
+            raise                                    # без базы работать нечем — пусть увидят ошибку
+        log(t("Не удалось проверить обновление базы модов ({e}) — работаю на сохранённой", e=e))
+        return False
+    if have and version and version == meta.get("version"):
+        return False
+    if have:
+        log(t("База модов в RePoE обновилась — скачиваю свежую"))
+    download_data(force=have, log=log)
+    for lang, (_, sub) in GAME_LANGS.items():
+        if sub and os.path.isdir(os.path.join(DATA_DIR, *sub.strip("/").split("/"))):
+            download_lang(lang, force=True, log=log)
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(meta_path, "w", encoding="utf-8") as f:     # только после всех загрузок: сбой — повтор
+        json.dump({"version": version}, f)
+    if have:
+        log(t("База модов обновлена"))
+    return have
+
+
 def skeleton(text):
     """Текст строки -> 'скелет' без чисел, для сравнения с шаблоном."""
     s = text.lower().replace("\u2013", "-").replace("ё", "е")
@@ -137,7 +178,7 @@ class Mod:
 class ModDB:
     def __init__(self, log=print):
         self.log = log
-        download_data(log=log)
+        refresh_data(log=log)
         log(t("Загружаю базу модов ..."))
         with open(os.path.join(DATA_DIR, "mods.json"), encoding="utf-8") as f:
             self.mods = json.load(f)

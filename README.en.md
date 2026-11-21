@@ -19,7 +19,9 @@ Windows may show “Windows protected your PC” — “More info” → “Run 
 3. check the English Windows text recognition pack and offer to install it if it's missing
    (Windows will ask for administrator rights — agree);
 4. start the program. On the first run the mod database is downloaded (~55 MB, the `data` folder).
-   After a new patch delete the `data` folder to download a fresh one.
+
+**The mod database updates itself:** on every start the program checks whether a new export of the game
+data is out (after a patch) and downloads it. Without internet it works on the saved database.
 
 An internet connection is needed on the first run. If the game runs as administrator, run
 the program as administrator too, otherwise it can't block clicks in the game.

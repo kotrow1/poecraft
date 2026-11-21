@@ -19,7 +19,7 @@ import zipfile
 from i18n import t
 from paths import APP_DIR, FROZEN
 
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 REPO = "kotrow1/poecraft"
 API_LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
 RELEASES_URL = f"https://github.com/{REPO}/releases"
