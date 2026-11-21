@@ -36,7 +36,9 @@ from PIL import Image, ImageChops, ImageOps
 from pynput import keyboard, mouse
 
 from moddb import ModDB, Requirement, check_rule, match_lines, parse_item_text
+import i18n
 import updater
+from i18n import t
 
 OCR_LANG = "en-US"
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
@@ -144,7 +146,7 @@ def mouse_filter(msg, data):
             S.suppressed_down = False
             if S.armed and S.shift_lock and S.shift_down and not S.latched:
                 S.latched = True
-                log("Shift-замок: Shift удерживается — можно отпустить и кликать только ЛКМ")
+                log(t("Shift-замок: Shift удерживается — можно отпустить и кликать только ЛКМ"))
             if S.armed and S.step_mode and S.region and S.ctx:
                 S.pending, S.pending_since, S.pending_key = True, now, S.last_key
     elif msg == WM_LBUTTONUP and S.suppressed_down:
@@ -164,7 +166,7 @@ def kb_filter(msg, data):
     if msg in (WM_KEYDOWN, WM_SYSKEYDOWN):
         if S.latched and not S.shift_down:     # новое нажатие Shift — снять замок
             S.latched = False
-            log("Shift-замок снят")
+            log(t("Shift-замок снят"))
         S.shift_down = True
     elif msg in (WM_KEYUP, WM_SYSKEYUP):
         S.shift_down = False
@@ -180,7 +182,7 @@ def release_latch():
             keyboard.Controller().release(keyboard.Key.shift)
         except Exception:
             pass
-        log("Shift-замок снят, Shift отпущен")
+        log(t("Shift-замок снят, Shift отпущен"))
 
 
 kb_listener = keyboard.Listener(on_press=lambda k: on_key(k), win32_event_filter=kb_filter)
@@ -201,7 +203,7 @@ def calibrate():
     S.crop = None
     CONFIG["region"] = S.region
     save_config()
-    log(f"Калибровка: курсор {x},{y}; область {S.region}")
+    log(t("Калибровка: курсор {x},{y}; область {region}", x=x, y=y, region=S.region))
 
 
 def on_key_action(action):
@@ -213,12 +215,12 @@ def on_key_action(action):
         if S.blocked():                  # первое нажатие после попадания — только снять блок
             S.block_hold = False
             S.block_until = 0
-            log("Блок снят, охрана остаётся включённой")
+            log(t("Блок снят, охрана остаётся включённой"))
             return
         S.armed = not S.armed
         if not S.armed:
             release_latch()
-        log("ОХРАНА ВКЛЮЧЕНА" if S.armed else "Охрана выключена")
+        log(t("ОХРАНА ВКЛЮЧЕНА") if S.armed else t("Охрана выключена"))
     elif action == "test":
         S.force_ocr = True
 
@@ -255,7 +257,7 @@ class FastOCR:
         from winrt.windows.storage.streams import DataWriter
         self.DataWriter, self.SoftwareBitmap, self.fmt = DataWriter, SoftwareBitmap, BitmapPixelFormat.RGBA8
         if not OcrEngine.is_language_supported(Language(lang)):
-            raise RuntimeError("в Windows не установлен пакет распознавания для английского (en-US)")
+            raise RuntimeError(t("в Windows не установлен пакет распознавания для английского (en-US)"))
         self.engine = OcrEngine.try_create_from_language(Language(lang))
         self.loop = asyncio.new_event_loop()
 
@@ -361,7 +363,7 @@ def worker():
         try:
             lines = ocr_lines(img)
         except Exception as e:
-            log(f"Ошибка OCR: {e}")
+            log(t("Ошибка OCR: {e}", e=e))
             time.sleep(1)
             continue
         texts = [t for t, _ in lines]
@@ -382,7 +384,7 @@ def worker():
             new = crop_from(lines, matches, R["width"], R["height"])
             if new:
                 S.crop = new
-                log(f"Область сужена до подсказки: {new[2]-new[0]}x{new[3]-new[1]}")
+                log(t("Область сужена до подсказки: {w}x{h}", w=new[2] - new[0], h=new[3] - new[1]))
         elif crop is not None:
             w, h = crop[2] - crop[0], crop[3] - crop[1]
             wanted = {l for m in matches for l in m.lines}
@@ -391,10 +393,10 @@ def worker():
             if not matches or near_edge:
                 S.crop = None                     # следующий кадр — снова полный поиск
 
-        timing = (f"[захват {1000*(t1-t0):.0f} + OCR {1000*(t2-t1):.0f} + разбор {1000*(t3-t2):.0f}"
-                  f" = {1000*(t3-t0):.0f} мс]")
+        timing = t("[захват {a} + OCR {b} + разбор {c} = {d} мс]", a=f"{1000*(t1-t0):.0f}",
+                   b=f"{1000*(t2-t1):.0f}", c=f"{1000*(t3-t2):.0f}", d=f"{1000*(t3-t0):.0f}")
         if force:
-            log("ТЕСТ OCR, сырые строки:\n    " + "\n    ".join(texts))
+            log(t("ТЕСТ OCR, сырые строки:") + "\n    " + "\n    ".join(texts))
         text_key = "|".join(m.describe() for m in matches)
         repeat = text_key == last_text
         last_text = text_key
@@ -404,13 +406,16 @@ def worker():
         if (matches and not repeat) or hit:
             UI.put(("roll", (matches, hit, 1000 * (t3 - t0))))
         if (matches and not repeat) or force or hit:
-            log(timing + (" СОВПАЛО! " if hit else " ") + "; ".join(m.describe() for m in matches))
+            log(timing + (" " + t("СОВПАЛО!") + " " if hit else " ") + "; ".join(m.describe() for m in matches))
 
 
 # ---------------- окно ----------------
 GREEN, AMBER, RED, GRAY = "#4caf50", "#f9a825", "#e53935", "#8a8a8a"
-INF_OPTIONS = [("любое", None, None), ("ровно 1", 1, 1), ("ровно 2", 2, 2), ("ровно 3", 3, 3),
-               ("не меньше 1", 1, None), ("не меньше 2", 2, None), ("ни одного", 0, 0)]
+# (ключ, подпись — она же ключ перевода, мин, макс); в пресетах хранится ключ (в старых — русская подпись)
+INF_OPTIONS = [("any", "любое", None, None), ("eq1", "ровно 1", 1, 1), ("eq2", "ровно 2", 2, 2),
+               ("eq3", "ровно 3", 3, 3), ("ge1", "не меньше 1", 1, None), ("ge2", "не меньше 2", 2, None),
+               ("none", "ни одного", 0, 0)]
+MODE_OPTIONS = [("all", "все выбранные"), ("any", "любой из выбранных")]
 DEFAULT_SETTINGS = {"block_seconds": 6, "hold": False, "step": True, "shift_lock": True, "on_top": False,
                     "auto_update": True}
 
@@ -424,9 +429,9 @@ def fmt_chance(c):
 def group_tags(mods):
     seen = []
     for m in mods:
-        for t in m.tags:
-            if t not in seen:
-                seen.append(t)
+        for tag in m.tags:
+            if tag not in seen:
+                seen.append(tag)
     return seen
 
 
@@ -438,6 +443,7 @@ class App:
         self.selected = {}            # group_key -> tier
         self.rows = {}                # iid -> group_key
         self.settings = dict(DEFAULT_SETTINGS, **CONFIG["settings"])
+        self.settings.setdefault("lang", i18n.LANG)
         root.title(f"PoE Craft Guard {updater.VERSION}")
         self.upd_busy = ""            # "" / "check" / "install"
         self.upd_info = None          # последний выпуск с GitHub (dict из updater.check)
@@ -455,8 +461,18 @@ class App:
         style.configure("Link.TLabel", font=("Segoe UI", 10, "underline"), foreground="#64b5f6")
         root.attributes("-topmost", self.settings["on_top"])
 
+        self.build_ui()
+        root.after(5000, self.auto_check)
+        self.apply_settings()
+
+        if CONFIG.get("region"):
+            S.region = CONFIG["region"]
+        threading.Thread(target=self.load_db, daemon=True).start()
+        root.after(50, self.poll)
+
+    def build_ui(self):
         self.build_steps()
-        body = ttk.PanedWindow(root, orient="horizontal")
+        body = ttk.PanedWindow(self.root, orient="horizontal")
         body.pack(fill="both", expand=True, padx=10, pady=(0, 6))
         left = ttk.Frame(body, padding=(0, 0, 8, 0))
         right = ttk.Frame(body, padding=(8, 0, 0, 0))
@@ -466,49 +482,68 @@ class App:
         self.build_target(right)
         self.build_bottom()
         self.make_overlay()
-        root.after(5000, self.auto_check)
-        self.apply_settings()
 
-        if CONFIG.get("region"):
-            S.region = CONFIG["region"]
-        threading.Thread(target=self.load_db, daemon=True).start()
-        root.after(50, self.poll)
+    def ui_state(self):
+        """Состояние окна для rebuild_ui — снимать ДО смены языка (подписи сравниваются с t())."""
+        return dict(search=self.search.get(), gen=self.gen_f.get(), inf=self.inf_f.get(),
+                    hide=self.hide_na.get(), mode=self.mode_key(), infc=self.inf_key(),
+                    preset=self.preset.get(), log=self.logbox.get("1.0", "end-1c"), logv=self.log_visible)
+
+    def rebuild_ui(self, keep):
+        """Смена языка: окно собирается заново, выбор модов, фильтры, пресет и журнал сохраняются."""
+        for w in self.root.winfo_children():
+            w.destroy()
+        self.build_ui()
+        self.hide_na.set(keep["hide"])
+        self.gen_f.set(keep["gen"])
+        if S.ctx:
+            self.rebuild_inf_chips(S.ctx.influences)
+        self.inf_f.set(keep["inf"])
+        self.set_mode(keep["mode"])
+        self.set_inf(keep["infc"])
+        self.preset.set(keep["preset"])
+        self.logbox.insert("end", keep["log"] + ("\n" if keep["log"] else ""))
+        if keep["logv"]:
+            self.toggle_log()
+        self.search.set(keep["search"])
+        self.apply_settings()
+        self.refresh_all()
 
     # ======== шаги ========
     def build_steps(self):
         bar = ttk.Frame(self.root, padding=10)
         bar.pack(fill="x")
         self.steps = {}
-        specs = [("base", "1  База", self.do_import), ("calib", "2  Калибровка", None),
-                 ("target", "3  Цель", None), ("guard", "4  Охрана", self.toggle_guard)]
+        specs = [("base", t("1  База"), self.do_import), ("calib", t("2  Калибровка"), None),
+                 ("target", t("3  Цель"), None), ("guard", t("4  Охрана"), self.toggle_guard)]
         for i, (key, title, cmd) in enumerate(specs):
             f = ttk.Frame(bar, style="Card.TFrame", padding=(12, 8))
             f.grid(row=0, column=i, sticky="nsew", padx=4)
             bar.columnconfigure(i, weight=1, uniform="steps")
-            t = ttk.Label(f, text=title, style="Step.TLabel")
-            t.pack(anchor="w")
+            head = ttk.Label(f, text=title, style="Step.TLabel")
+            head.pack(anchor="w")
             d = ttk.Label(f, text="", style="Hint.TLabel")
             d.pack(anchor="w")
             if cmd:
-                for w in (f, t, d):
+                for w in (f, head, d):
                     w.bind("<Button-1>", lambda e, c=cmd: c())
                     w.configure(cursor="hand2")
-            self.steps[key] = (t, d)
-        self.base_btn = ttk.Button(bar, text="⟳ Новая база", command=self.do_import)
+            self.steps[key] = (head, d)
+        self.base_btn = ttk.Button(bar, text=t("⟳ Новая база"), command=self.do_import)
         self.base_btn.grid(row=0, column=4, sticky="ns", padx=(8, 0))
-        gear = ttk.Button(bar, text="⚙ Настройки", command=self.open_settings)
+        gear = ttk.Button(bar, text=t("⚙ Настройки"), command=self.open_settings)
         gear.grid(row=0, column=5, sticky="ns", padx=(8, 0))
 
     def set_step(self, key, done, detail, color=None):
-        t, d = self.steps[key]
+        head, d = self.steps[key]
         if len(detail) > 46:
             detail = detail[:45] + "…"
-        t.configure(foreground=color or (GREEN if done else AMBER))
+        head.configure(foreground=color or (GREEN if done else AMBER))
         d.configure(text=detail)
 
     # ======== пул модов ========
     def build_pool(self, parent):
-        ttk.Label(parent, text="Моды базы", style="Head.TLabel").pack(anchor="w")
+        ttk.Label(parent, text=t("Моды базы"), style="Head.TLabel").pack(anchor="w")
         row = ttk.Frame(parent)
         row.pack(fill="x", pady=(6, 4))
         self.search = tk.StringVar()
@@ -516,13 +551,13 @@ class App:
         e = ttk.Entry(row, textvariable=self.search)
         e.pack(side="left", fill="x", expand=True)
         self.hide_na = tk.BooleanVar(value=True)
-        ttk.Checkbutton(row, text="скрыть недоступные", variable=self.hide_na,
+        ttk.Checkbutton(row, text=t("скрыть недоступные"), variable=self.hide_na,
                         command=self.fill).pack(side="left", padx=(8, 0))
 
         chips = ttk.Frame(parent)
         chips.pack(fill="x", pady=(0, 6))
         self.gen_f = tk.StringVar(value="all")
-        for val, txt in (("all", "Все"), ("prefix", "Префиксы"), ("suffix", "Суффиксы")):
+        for val, txt in (("all", t("Все")), ("prefix", t("Префиксы")), ("suffix", t("Суффиксы"))):
             ttk.Radiobutton(chips, text=txt, value=val, variable=self.gen_f, style="Toggle.TButton",
                             command=self.fill).pack(side="left", padx=(0, 4))
         self.inf_f = tk.StringVar(value="all")
@@ -534,11 +569,11 @@ class App:
         wrap.pack(fill="both", expand=True)
         self.tree = ttk.Treeview(wrap, columns=("add", "chance", "tiers", "tags"),
                                  show="tree headings", selectmode="browse")
-        self.tree.heading("#0", text="Мод (лучший доступный тир)", anchor="w")
+        self.tree.heading("#0", text=t("Мод (лучший доступный тир)"), anchor="w")
         self.tree.heading("add", text="")
-        self.tree.heading("chance", text="Шанс", anchor="e")
-        self.tree.heading("tiers", text="Тиры", anchor="w")
-        self.tree.heading("tags", text="Теги", anchor="w")
+        self.tree.heading("chance", text=t("Шанс"), anchor="e")
+        self.tree.heading("tiers", text=t("Тиры"), anchor="w")
+        self.tree.heading("tags", text=t("Теги"), anchor="w")
         self.tree.column("#0", width=380, stretch=True)
         self.tree.column("add", width=36, anchor="center", stretch=False)
         self.tree.column("chance", width=62, anchor="e", stretch=False)
@@ -554,16 +589,16 @@ class App:
         self.tree.bind("<ButtonRelease-1>", self.on_tree_click)
         self.tree.bind("<Double-1>", lambda e: self.toggle_row(self.tree.identify_row(e.y)))
         self.tree.bind("<Return>", lambda e: self.toggle_row(self.tree.focus()))
-        ttk.Label(parent, text="Клик по ＋ или двойной клик — добавить в цель / убрать.  "
-                               "Шанс — доля веса мода среди префиксов (суффиксов) этой базы; "
-                               "поиск ищет и по тегам (attack, life, critical...)",
+        ttk.Label(parent, text=t("Клик по ＋ или двойной клик — добавить в цель / убрать.  "
+                                 "Шанс — доля веса мода среди префиксов (суффиксов) этой базы; "
+                                 "поиск ищет и по тегам (attack, life, critical...)"),
                   style="Hint.TLabel", wraplength=640, justify="left").pack(anchor="w", pady=(4, 0))
 
     def rebuild_inf_chips(self, influences):
         for w in self.inf_chips.winfo_children():
             w.destroy()
-        opts = [("all", "Любое")] + [("none", "Обычные")] + [(i, i) for i in influences] + \
-               ([("elev", "Элевейтед")] if influences else [])
+        opts = [("all", t("Любое"))] + [("none", t("Обычные"))] + [(i, i) for i in influences] + \
+               ([("elev", t("Элевейтед"))] if influences else [])
         if self.inf_f.get() not in [v for v, _ in opts]:
             self.inf_f.set("all")
         for val, txt in opts:
@@ -599,8 +634,8 @@ class App:
         order = lambda sec: (sec[0] != "prefix", sec[1] != "", sec[2], sec[1])
         for sec in sorted(sections, key=order):
             gen, inf, elev = sec
-            title = ("Префиксы" if gen == "prefix" else "Суффиксы") + " · " + (inf or "обычные") + \
-                    (" · элевейтед" if elev else "")
+            title = t("Префиксы" if gen == "prefix" else "Суффиксы") + " · " + (inf or t("обычные")) + \
+                    (" · " + t("элевейтед") if elev else "")
             items = sorted(sections[sec], key=lambda x: (x[0] not in self.selected,
                                                          -sum(m.chance for m in x[1]), (x[2] or x[1])[0].text))
             pid = self.tree.insert("", "end", text=f"{title}  ({len(items)})", open=True, tags=("section",))
@@ -652,21 +687,21 @@ class App:
 
     # ======== цель ========
     def build_target(self, parent):
-        ttk.Label(parent, text="Цель", style="Head.TLabel").pack(anchor="w")
+        ttk.Label(parent, text=t("Цель"), style="Head.TLabel").pack(anchor="w")
         cond = ttk.Frame(parent)
         cond.pack(fill="x", pady=(6, 2))
-        ttk.Label(cond, text="Блокировать, когда есть").pack(side="left")
-        self.mode = tk.StringVar(value="все выбранные")
-        cb = ttk.Combobox(cond, textvariable=self.mode, state="readonly", width=16,
-                          values=["все выбранные", "любой из выбранных"])
+        ttk.Label(cond, text=t("Блокировать, когда есть")).pack(side="left")
+        self.mode = tk.StringVar(value=t(MODE_OPTIONS[0][1]))
+        cb = ttk.Combobox(cond, textvariable=self.mode, state="readonly", width=18,
+                          values=[t(label) for _, label in MODE_OPTIONS])
         cb.pack(side="left", padx=6)
         cb.bind("<<ComboboxSelected>>", lambda e: self.sync())
         cond2 = ttk.Frame(parent)
         cond2.pack(fill="x", pady=(2, 6))
-        ttk.Label(cond2, text="Модов влияния на предмете").pack(side="left")
-        self.inf_count = tk.StringVar(value="любое")
+        ttk.Label(cond2, text=t("Модов влияния на предмете")).pack(side="left")
+        self.inf_count = tk.StringVar(value=t(INF_OPTIONS[0][1]))
         cb2 = ttk.Combobox(cond2, textvariable=self.inf_count, state="readonly", width=14,
-                           values=[o[0] for o in INF_OPTIONS])
+                           values=[t(o[1]) for o in INF_OPTIONS])
         cb2.pack(side="left", padx=6)
         cb2.bind("<<ComboboxSelected>>", lambda e: self.sync())
 
@@ -686,20 +721,20 @@ class App:
 
         pre = ttk.Frame(parent)
         pre.pack(fill="x", pady=(8, 0))
-        ttk.Label(pre, text="Пресет").pack(side="left")
+        ttk.Label(pre, text=t("Пресет")).pack(side="left")
         self.preset = tk.StringVar()
         self.preset_cb = ttk.Combobox(pre, textvariable=self.preset, width=22)
         self.preset_cb.pack(side="left", padx=6, fill="x", expand=True)
         self.preset_cb.bind("<<ComboboxSelected>>", lambda e: self.load_preset())
-        ttk.Button(pre, text="Сохранить", command=self.save_preset).pack(side="left")
-        ttk.Button(pre, text="Удалить", command=self.delete_preset).pack(side="left", padx=(4, 0))
+        ttk.Button(pre, text=t("Сохранить"), command=self.save_preset).pack(side="left")
+        ttk.Button(pre, text=t("Удалить"), command=self.delete_preset).pack(side="left", padx=(4, 0))
         self.update_presets()
 
     def render_cards(self):
         for w in self.cards.winfo_children():
             w.destroy()
         if not self.selected:
-            ttk.Label(self.cards, text="Добавь моды из списка слева — нажми ＋ у нужного мода.",
+            ttk.Label(self.cards, text=t("Добавь моды из списка слева — нажми ＋ у нужного мода."),
                       style="Hint.TLabel", wraplength=380, justify="left").pack(anchor="w", pady=12)
             return
         for key, tier in self.selected.items():
@@ -707,8 +742,8 @@ class App:
             if not mods:
                 continue
             typ, inf, gen, elev = key
-            meta = ("Префикс" if gen == "prefix" else "Суффикс") + (f" · {inf}" if inf else "") + \
-                   (" · элевейтед" if elev else "")
+            meta = t("Префикс" if gen == "prefix" else "Суффикс") + (f" · {inf}" if inf else "") + \
+                   (" · " + t("элевейтед") if elev else "")
             tg = group_tags(mods)
             if tg:
                 meta += "  ·  " + ", ".join(tg)
@@ -721,9 +756,9 @@ class App:
             ttk.Label(top, text=best.text, wraplength=360, justify="left").pack(side="left", fill="x")
             values = []
             for m in mods:
-                v = f"не хуже T{m.tier}   ·   {m.text}" + (f"   ·   {fmt_chance(m.chance)}" if m.chance else "")
+                v = t("не хуже T{tier}", tier=m.tier) + f"   ·   {m.text}" + (f"   ·   {fmt_chance(m.chance)}" if m.chance else "")
                 if not m.spawnable:
-                    v += f"   (нужен ilvl {m.level})"
+                    v += "   " + t("(нужен ilvl {lvl})", lvl=m.level)
                 values.append(v)
             cb = ttk.Combobox(card, values=values, state="readonly")
             cb.pack(fill="x", pady=(6, 0))
@@ -750,14 +785,14 @@ class App:
     def save_preset(self):
         name = self.preset.get().strip()
         if not name:
-            log("Введи имя пресета в поле и нажми «Сохранить».")
+            log(t("Введи имя пресета в поле и нажми «Сохранить»."))
             return
         CONFIG["presets"][name] = {
             "reqs": [[list(k), t] for k, t in self.selected.items()],
-            "mode": self.mode.get(), "inf": self.inf_count.get()}
+            "mode": self.mode_key(), "inf": self.inf_key()}
         save_config()
         self.update_presets()
-        log(f"Пресет «{name}» сохранён")
+        log(t("Пресет «{name}» сохранён", name=name))
 
     def load_preset(self):
         p = CONFIG["presets"].get(self.preset.get())
@@ -765,17 +800,32 @@ class App:
             return
         self.selected.clear()
         missing = 0
-        for k, t in p.get("reqs", []):
+        for k, tier in p.get("reqs", []):
             k = tuple(k)
             if S.ctx and k in S.ctx.groups:
-                self.selected[k] = t
+                self.selected[k] = tier
             else:
                 missing += 1
-        self.mode.set(p.get("mode", "все выбранные"))
-        self.inf_count.set(p.get("inf", "любое"))
+        self.set_mode(p.get("mode", "all"))
+        self.set_inf(p.get("inf", "any"))
         self.refresh_all()
         if missing:
-            log(f"Пресет загружен, но {missing} мод(ов) не может выпасть на этой базе")
+            log(t("Пресет загружен, но {n} мод(ов) не может выпасть на этой базе", n=missing))
+
+    # режим и число модов влияния: в окне — подписи на текущем языке, внутри и в пресетах — ключи
+    def mode_key(self):
+        return next((k for k, label in MODE_OPTIONS if t(label) == self.mode.get()), "all")
+
+    def inf_key(self):
+        return next((o[0] for o in INF_OPTIONS if t(o[1]) == self.inf_count.get()), "any")
+
+    def set_mode(self, key):                 # ключ или русская подпись (старые пресеты)
+        label = next((label for k, label in MODE_OPTIONS if key in (k, label)), MODE_OPTIONS[0][1])
+        self.mode.set(t(label))
+
+    def set_inf(self, key):
+        label = next((o[1] for o in INF_OPTIONS if key in (o[0], o[1])), INF_OPTIONS[0][1])
+        self.inf_count.set(t(label))
 
     def delete_preset(self):
         if CONFIG["presets"].pop(self.preset.get(), None) is not None:
@@ -789,10 +839,10 @@ class App:
         bot.pack(fill="x")
         head = ttk.Frame(bot)
         head.pack(fill="x")
-        ttk.Label(head, text="Последний ролл", style="Head.TLabel").pack(side="left")
+        ttk.Label(head, text=t("Последний ролл"), style="Head.TLabel").pack(side="left")
         self.roll_ms = ttk.Label(head, text="", style="Hint.TLabel")
         self.roll_ms.pack(side="left", padx=10)
-        self.log_btn = ttk.Button(head, text="Журнал ▸", command=self.toggle_log)
+        self.log_btn = ttk.Button(head, text=t("Журнал") + " ▸", command=self.toggle_log)
         self.log_btn.pack(side="right")
         self.roll = tk.Text(bot, height=4, wrap="word", relief="flat", font=("Segoe UI", 11),
                             padx=8, pady=6, cursor="arrow")
@@ -808,16 +858,16 @@ class App:
         self.log_visible = not self.log_visible
         if self.log_visible:
             self.logbox.pack(fill="x", pady=(6, 0))
-            self.log_btn.configure(text="Журнал ▾")
+            self.log_btn.configure(text=t("Журнал") + " ▾")
         else:
             self.logbox.pack_forget()
-            self.log_btn.configure(text="Журнал ▸")
+            self.log_btn.configure(text=t("Журнал") + " ▸")
 
     def show_roll(self, matches, hit, ms):
         self.roll.configure(state="normal")
         self.roll.delete("1.0", "end")
         if hit:
-            self.roll.insert("end", "СОВПАЛО — клик заблокирован\n", "hit")
+            self.roll.insert("end", t("СОВПАЛО — клик заблокирован") + "\n", "hit")
         for mt in matches:
             good = any(m.group_key in self.selected and m.tier <= self.selected[m.group_key]
                        for m in mt.candidates)
@@ -827,80 +877,136 @@ class App:
             self.roll.insert("end", ("✓ " if good else "   ") + f"{text}   ", "ok" if good else "")
             self.roll.insert("end", f"{tiers}{inf}\n", "dim")
         self.roll.configure(state="disabled")
-        self.roll_ms.configure(text=f"{ms:.0f} мс")
+        self.roll_ms.configure(text=t("{ms} мс", ms=f"{ms:.0f}"))
 
-    # ======== настройки ========
-    def open_settings(self):
-        win = tk.Toplevel(self.root)
-        win.title("Настройки")
+    # ======== настройки (как в Awakened PoE Trade: разделы слева, «Сохранить» / «Отмена» внизу) ========
+    SECTIONS = (("hotkeys", "Горячие клавиши"), ("general", "Общие"), ("guard", "Охрана"), ("about", "О программе"))
+
+    def open_settings(self, section="hotkeys"):
+        if getattr(self, "settings_win", None) and self.settings_win.winfo_exists():
+            self.settings_win.lift()
+            return
+        win = self.settings_win = tk.Toplevel(self.root)
+        win.title(t("Настройки") + " — PoE Craft Guard")
         win.transient(self.root)
-        win.resizable(False, False)
-        nb = ttk.Notebook(win)
-        nb.pack(fill="both", expand=True, padx=8, pady=8)
-        f = ttk.Frame(nb, padding=14)
-        nb.add(f, text="Настройки")
-        about = ttk.Frame(nb, padding=14)
-        nb.add(about, text="О программе")
-        self.build_about(about)
-        ttk.Label(f, text="Горячие клавиши", style="Head.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
+        win.geometry("780x540")
+        win.minsize(700, 480)
+        hotkeys_before = dict(HOTKEYS)          # «Отмена» вернёт клавиши как были
+
+        side = ttk.Frame(win, style="Card.TFrame", padding=(8, 10))
+        side.pack(side="left", fill="y")
+        bottom = ttk.Frame(win, padding=(14, 8))
+        bottom.pack(side="bottom", fill="x")
+        ttk.Separator(win).pack(side="bottom", fill="x")
+        content = ttk.Frame(win, padding=(20, 14))
+        content.pack(side="left", fill="both", expand=True)
+
+        pages, cur = {}, tk.StringVar(value=section)
+        for key, _ in self.SECTIONS:
+            pages[key] = ttk.Frame(content)
+
+        def show():
+            for k, p in pages.items():
+                if k == cur.get():
+                    p.pack(fill="both", expand=True)
+                else:
+                    p.pack_forget()
+        for i, (key, title) in enumerate(self.SECTIONS):
+            if key == "about":
+                ttk.Separator(side).pack(fill="x", pady=8)
+            ttk.Radiobutton(side, text=t(title), value=key, variable=cur, style="Toggle.TButton",
+                            command=show, width=18).pack(fill="x", pady=2)
+
+        # --- горячие клавиши ---
+        f = pages["hotkeys"]
+        f.columnconfigure(0, weight=1)
+        ttk.Label(f, text=t("Горячие клавиши"), style="Head.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
+        ttk.Label(f, text=t("Нажми кнопку, затем новую клавишу (Esc — отмена)"),
+                  style="Hint.TLabel").grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 8))
         self.key_btns = {}
-        r = 1
-        for action, title in HOTKEY_NAMES.items():
-            ttk.Label(f, text=title).grid(row=r, column=0, sticky="w", pady=3)
-            b = ttk.Button(f, width=12, command=lambda a=action: self.start_bind(a))
-            b.grid(row=r, column=1, sticky="e", pady=3)
+        for r, (action, title) in enumerate(HOTKEY_NAMES.items(), start=2):
+            ttk.Label(f, text=t(title)).grid(row=r, column=0, sticky="w", pady=4)
+            b = ttk.Button(f, width=16, command=lambda a=action: self.start_bind(a))
+            b.grid(row=r, column=1, sticky="e", pady=4)
             self.key_btns[action] = b
-            r += 1
         self.update_key_btns()
-        ttk.Label(f, text="Нажми кнопку, затем новую клавишу (Esc — отмена)",
-                  style="Hint.TLabel").grid(row=r, column=0, columnspan=2, sticky="w")
-        r += 1
-        ttk.Separator(f).grid(row=r, column=0, columnspan=2, sticky="ew", pady=10)
-        r += 1
-        ttk.Label(f, text="Охрана", style="Head.TLabel").grid(row=r, column=0, columnspan=2, sticky="w")
-        r += 1
+
+        # --- общие ---
+        f = pages["general"]
+        ttk.Label(f, text=t("Язык"), style="Head.TLabel").pack(anchor="w")
+        names = list(i18n.LANGS.values())
+        lang = tk.StringVar(value=i18n.LANGS[i18n.LANG])
+        ttk.Combobox(f, textvariable=lang, values=names, state="readonly", width=16).pack(anchor="w", pady=(4, 14))
+        on_top = tk.BooleanVar(value=self.settings["on_top"])
+        ttk.Checkbutton(f, text=t("Окно программы поверх игры"), variable=on_top).pack(anchor="w", pady=2)
+
+        # --- охрана ---
+        f = pages["guard"]
+        ttk.Label(f, text=t("Охрана"), style="Head.TLabel").pack(anchor="w")
+        row = ttk.Frame(f)
+        row.pack(anchor="w", pady=(6, 6))
         secs = tk.StringVar(value=str(self.settings["block_seconds"]))
-        ttk.Label(f, text="Блокировать клик, секунд").grid(row=r, column=0, sticky="w", pady=3)
-        sp = ttk.Spinbox(f, from_=1, to=60, textvariable=secs, width=6)
-        sp.grid(row=r, column=1, sticky="e")
-        r += 1
+        ttk.Label(row, text=t("Блокировать клик, секунд")).pack(side="left")
+        ttk.Spinbox(row, from_=1, to=60, textvariable=secs, width=6).pack(side="left", padx=8)
         checks = [("hold", "Держать блок до повторного нажатия клавиши охраны"),
                   ("step", "Пошаговый режим: следующий клик только после проверки"),
-                  ("shift_lock", "Shift-замок: Shift залипает после первого клика"),
-                  ("on_top", "Окно программы поверх игры")]
-        vars_ = {}
+                  ("shift_lock", "Shift-замок: Shift залипает после первого клика")]
+        vars_ = {"on_top": on_top}
         for k, txt in checks:
             v = tk.BooleanVar(value=self.settings[k])
-            ttk.Checkbutton(f, text=txt, variable=v).grid(row=r, column=0, columnspan=2, sticky="w", pady=2)
+            ttk.Checkbutton(f, text=t(txt), variable=v).pack(anchor="w", pady=2)
             vars_[k] = v
-            r += 1
 
-        def apply_and_close():
+        # --- о программе ---
+        vars_["auto_update"] = self.build_about(pages["about"])
+
+        def close():
+            UI_CAPTURE[0] = None
+            self.about = None
+            self.key_btns = {}
+            self.settings_win = None
+            win.destroy()
+
+        def save():
             try:
                 self.settings["block_seconds"] = max(0.5, float(secs.get().replace(",", ".")))
             except ValueError:
                 pass
             for k, v in vars_.items():
                 self.settings[k] = v.get()
+            new_lang = next(code for code, name in i18n.LANGS.items() if name == lang.get())
+            changed = new_lang != i18n.LANG
+            self.settings["lang"] = new_lang
             CONFIG["settings"] = self.settings
             save_config()
+            close()
             self.apply_settings()
-            UI_CAPTURE[0] = None
-            self.about = None
-            win.destroy()
-        ttk.Button(f, text="Готово", style="Accent.TButton", command=apply_and_close).grid(
-            row=r, column=0, columnspan=2, sticky="ew", pady=(12, 0))
-        win.protocol("WM_DELETE_WINDOW", apply_and_close)
+            if changed:
+                keep = self.ui_state()
+                i18n.set_lang(new_lang)
+                self.rebuild_ui(keep)
+
+        def cancel():
+            if HOTKEYS != hotkeys_before:
+                HOTKEYS.clear()
+                HOTKEYS.update(hotkeys_before)
+                save_config()
+            close()
+        ttk.Button(bottom, text=t("Отмена"), command=cancel).pack(side="right")
+        ttk.Button(bottom, text=t("Сохранить"), style="Accent.TButton", command=save).pack(side="right", padx=8)
+        win.protocol("WM_DELETE_WINDOW", cancel)
+        show()
 
     # ======== о программе и обновления ========
     def build_about(self, f):
+        """Раздел «О программе»; возвращает переменную галочки автообновления."""
         f.columnconfigure(0, weight=1)
         ttk.Label(f, text="PoE Craft Guard", style="Title.TLabel").grid(row=0, column=0, pady=(6, 0))
-        ttk.Label(f, text=f"Версия {updater.VERSION}").grid(row=1, column=0)
+        ttk.Label(f, text=t("Версия {v}", v=updater.VERSION)).grid(row=1, column=0)
         links = ttk.Frame(f)
         links.grid(row=2, column=0, pady=(4, 12))
-        for i, (txt, url) in enumerate((("Что нового", updater.RELEASES_URL),
-                                        ("Сообщить об ошибке на GitHub", updater.ISSUES_URL))):
+        for i, (txt, url) in enumerate(((t("Что нового"), updater.RELEASES_URL),
+                                        (t("Сообщить об ошибке на GitHub"), updater.ISSUES_URL))):
             lb = ttk.Label(links, text=txt, style="Link.TLabel", cursor="hand2")
             lb.grid(row=0, column=i, padx=8)
             lb.bind("<Button-1>", lambda e, u=url: webbrowser.open(u))
@@ -914,50 +1020,47 @@ class App:
         btn = ttk.Button(box, text="", command=self.update_button)
         btn.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         auto = tk.BooleanVar(value=self.settings["auto_update"])
-
-        def toggle_auto():
-            self.settings["auto_update"] = auto.get()
-            CONFIG["settings"] = self.settings
-            save_config()
-        ttk.Checkbutton(f, text="Обновлять автоматически (проверка при запуске и раз в 6 часов)",
-                        variable=auto, command=toggle_auto).grid(row=4, column=0, pady=(10, 0))
+        ttk.Checkbutton(f, text=t("Обновлять автоматически (проверка при запуске и раз в 6 часов)"),
+                        variable=auto).grid(row=4, column=0, pady=(10, 0))
         f.rowconfigure(5, weight=1, minsize=40)
         ttk.Label(f, text="Created by kotrow", style="Hint.TLabel").grid(row=6, column=0, sticky="s")
         self.about = {"status": status, "when": when, "btn": btn}
         self.refresh_about()
+        return auto
 
     @staticmethod
     def time_ago(ts):
         if not ts:
-            return "никогда"
+            return t("никогда")
         d = max(0, time.time() - ts)
         if d < 60:
-            return "только что"
+            return t("только что")
         if d < 3600:
-            return f"{int(d // 60)} мин назад"
+            return t("{n} мин назад", n=int(d // 60))
         if d < 86400:
-            return f"{int(d // 3600)} ч назад"
-        return f"{int(d // 86400)} дн назад"
+            return t("{n} ч назад", n=int(d // 3600))
+        return t("{n} дн назад", n=int(d // 86400))
 
     def update_state(self):
         """(текст статуса, цвет, текст кнопки) для вкладки «О программе»."""
         st = CONFIG["update"]
         latest, installed = st.get("latest", ""), st.get("installed", "")
         if self.upd_busy == "install":
-            return f"Устанавливаю версию {latest}...", AMBER, None
+            return t("Устанавливаю версию {v}...", v=latest), AMBER, None
         if self.upd_busy == "check":
-            return "Проверяю...", GRAY, None
+            return t("Проверяю..."), GRAY, None
         if installed and updater.is_newer(installed):
-            return f"Версия {installed} установлена — перезапусти программу", GREEN, "Проверить сейчас"
+            return t("Версия {v} установлена — перезапусти программу", v=installed), GREEN, t("Проверить сейчас")
         if st.get("error"):
-            return f"Не удалось: {st['error']}", RED, "Проверить сейчас"
+            return t("Не удалось: {e}", e=st["error"]), RED, t("Проверить сейчас")
         if latest and updater.is_newer(latest):
             if updater.is_git_checkout():
-                return f"Доступна версия {latest} — папка из git, обнови через git pull", AMBER, "Проверить сейчас"
-            return f"Доступна версия {latest}", AMBER, f"Установить {latest}"
+                return (t("Доступна версия {v} — папка из git, обнови через git pull", v=latest), AMBER,
+                        t("Проверить сейчас"))
+            return t("Доступна версия {v}", v=latest), AMBER, t("Установить {v}", v=latest)
         if latest:
-            return "Установлена последняя версия", None, "Проверить сейчас"
-        return "Обновления ещё не проверялись", None, "Проверить сейчас"
+            return t("Установлена последняя версия"), None, t("Проверить сейчас")
+        return t("Обновления ещё не проверялись"), None, t("Проверить сейчас")
 
     def refresh_about(self):
         if not self.about:
@@ -966,8 +1069,8 @@ class App:
         try:
             self.about["status"].configure(text=text, foreground=color or "")
             self.about["when"].configure(
-                text="Последняя проверка: " + self.time_ago(CONFIG["update"].get("last_check")))
-            self.about["btn"].configure(text=btn or "Подождите...", state="normal" if btn else "disabled")
+                text=t("Последняя проверка: {when}", when=self.time_ago(CONFIG["update"].get("last_check"))))
+            self.about["btn"].configure(text=btn or t("Подождите..."), state="normal" if btn else "disabled")
         except tk.TclError:
             self.about = None
 
@@ -1020,17 +1123,17 @@ class App:
             self.upd_info = data
             st.update(last_check=time.time(), latest=data["version"], error="")
             if updater.is_newer(data["version"]) and st.get("installed") != data["version"]:
-                log(f"Доступна новая версия {data['version']} (сейчас {updater.VERSION})")
+                log(t("Доступна новая версия {v} (сейчас {cur})", v=data["version"], cur=updater.VERSION))
                 if self.settings["auto_update"] and not updater.is_git_checkout():
                     save_config()
                     self.install_update()
                     return
         elif kind == "installed":
             st["installed"] = data
-            log(f"Обновлено до версии {data} — перезапусти программу, чтобы она заработала")
+            log(t("Обновлено до версии {v} — перезапусти программу, чтобы она заработала", v=data))
         else:
             st["error"] = data
-            log(("Обновление не установлено: " if busy == "install" else "Проверка обновлений: ") + data)
+            log(t("Обновление не установлено: {e}" if busy == "install" else "Проверка обновлений: {e}", e=data))
         save_config()
         self.refresh_about()
 
@@ -1049,7 +1152,7 @@ class App:
     def update_key_btns(self):
         for action, b in getattr(self, "key_btns", {}).items():
             try:
-                b.config(text="нажми..." if UI_CAPTURE[0] == action else hk(action))
+                b.config(text=t("нажми...") if UI_CAPTURE[0] == action else hk(action))
             except tk.TclError:
                 pass
 
@@ -1067,7 +1170,7 @@ class App:
                 HOTKEYS[other] = HOTKEYS[action]
             HOTKEYS[action] = name
             save_config()
-            log(f"{HOTKEY_NAMES[action]}: клавиша {name.upper()}")
+            log(t("{action}: клавиша {key}", action=t(HOTKEY_NAMES[action]), key=name.upper()))
         self.update_key_btns()
 
     # ======== индикатор поверх игры ========
@@ -1095,20 +1198,20 @@ class App:
     def load_db(self):
         try:
             self.db = ModDB(log=log)
-            log(f"База модов готова. Ctrl+Alt+C на предмете в игре → {hk('import')}.")
+            log(t("База модов готова. Ctrl+Alt+C на предмете в игре → {key}.", key=hk("import")))
         except Exception as e:
-            log(f"Не удалось загрузить базу: {e}")
+            log(t("Не удалось загрузить базу: {e}", e=e))
 
     def do_import(self):
         if self.db is None:
-            log("База модов ещё загружается...")
+            log(t("База модов ещё загружается..."))
             return
         try:
             ctx = parse_item_text(self.db, pyperclip.paste())
         except Exception as e:
-            log(f"Импорт не удался: {e}")
+            log(t("Импорт не удался: {e}", e=e))
             # ошибку держим на плашке несколько секунд, иначе poll сразу затрёт её старой базой
-            self.import_err = ("не вышло — сначала Ctrl+Alt+C", time.time() + 6)
+            self.import_err = (t("не вышло — сначала Ctrl+Alt+C"), time.time() + 6)
             return
         self.import_err = ("", 0.0)
         S.ctx = ctx
@@ -1116,7 +1219,7 @@ class App:
         self.selected = {k: v for k, v in self.selected.items() if k in ctx.groups}
         self.rebuild_inf_chips(ctx.influences)
         self.refresh_all()
-        log(f"Импортирована база: {ctx.base_name}")
+        log(t("Импортирована база: {name}", name=ctx.base_name))
 
     def toggle_guard(self):
         on_key_action("arm")
@@ -1129,36 +1232,37 @@ class App:
 
     def sync(self):
         S.reqs = [Requirement(k, t) for k, t in self.selected.items()]
-        S.mode = "all" if self.mode.get().startswith("все") else "any"
-        _, S.inf_min, S.inf_max = next(o for o in INF_OPTIONS if o[0] == self.inf_count.get())
+        S.mode = self.mode_key()
+        _, _, S.inf_min, S.inf_max = next(o for o in INF_OPTIONS if o[0] == self.inf_key())
 
     def update_steps(self):
         try:
-            self.base_btn.config(text=f"⟳ Новая база ({hk('import')})")
+            self.base_btn.config(text=t("⟳ Новая база ({key})", key=hk("import")))
         except tk.TclError:
             pass
         err, until = self.import_err
         if err and time.time() < until:
             self.set_step("base", False, err, RED)
         elif S.ctx:
-            inf = ", ".join(S.ctx.influences) or "без влияния"
+            inf = ", ".join(S.ctx.influences) or t("без влияния")
             extra = S.ctx.enchant if S.ctx.enchant else inf
             self.set_step("base", True, f"{S.ctx.base_name} · ilvl {S.ctx.ilvl} · {extra}")
         else:
-            self.set_step("base", False, f"Ctrl+Alt+C в игре → {hk('import')} или клик сюда")
+            self.set_step("base", False, t("Ctrl+Alt+C в игре → {key} или клик сюда", key=hk("import")))
         if S.region:
-            self.set_step("calib", True, f"готово · {hk('calibrate')} для повтора")
+            self.set_step("calib", True, t("готово · {key} для повтора", key=hk("calibrate")))
         else:
-            self.set_step("calib", False, f"наведи на предмет → {hk('calibrate')}")
+            self.set_step("calib", False, t("наведи на предмет → {key}", key=hk("calibrate")))
         n = len(self.selected)
-        self.set_step("target", n > 0, f"{n} мод(а)" if n else "выбери моды слева")
+        self.set_step("target", n > 0, t("{n} мод(а)", n=n) if n else t("выбери моды слева"))
         if S.blocked():
-            left = f"до {hk('arm')}" if S.block_hold else f"{S.block_until - time.time():.1f} с"
-            self.set_step("guard", True, f"КЛИК ЗАБЛОКИРОВАН · {left}", RED)
+            left = (t("до {key}", key=hk("arm")) if S.block_hold
+                    else t("{s} с", s=f"{S.block_until - time.time():.1f}"))
+            self.set_step("guard", True, t("КЛИК ЗАБЛОКИРОВАН · {left}", left=left), RED)
         elif S.armed:
-            self.set_step("guard", True, f"включена · {hk('arm')} — выкл" + ("  ·  ⇧ Shift" if S.latched else ""))
+            self.set_step("guard", True, t("включена · {key} — выкл", key=hk("arm")) + ("  ·  ⇧ Shift" if S.latched else ""))
         else:
-            self.set_step("guard", False, f"выключена · {hk('arm')} или клик сюда")
+            self.set_step("guard", False, t("выключена · {key} или клик сюда", key=hk("arm")))
 
     def poll(self):
         while not UI.empty():
@@ -1175,23 +1279,24 @@ class App:
             elif kind == "update":
                 self.on_update(*data)
             elif kind == "hit":
-                log("СОВПАЛО — левый клик заблокирован")
+                log(t("СОВПАЛО — левый клик заблокирован"))
         self.update_steps()
         if S.blocked():
-            short, bg = ("⛔ БЛОК до " + hk("arm") if S.block_hold
-                         else f"⛔ БЛОК {S.block_until - time.time():.1f} с"), "#c62828"
+            short, bg = (t("⛔ БЛОК до {key}", key=hk("arm")) if S.block_hold
+                         else t("⛔ БЛОК {s} с", s=f"{S.block_until - time.time():.1f}")), "#c62828"
         elif S.armed and S.pending and time.time() - S.pending_since < PENDING_TIMEOUT:
-            short, bg = "⏳ проверка...", "#f9a825"
+            short, bg = t("⏳ проверка..."), "#f9a825"
         elif S.armed:
-            short, bg = "🟢 ОХРАНА" + ("  ⇧ Shift" if S.latched else ""), "#2e7d32"
+            short, bg = t("🟢 ОХРАНА") + ("  ⇧ Shift" if S.latched else ""), "#2e7d32"
         else:
-            short, bg = "⚪ охрана выкл", "#424242"
+            short, bg = t("⚪ охрана выкл"), "#424242"
         self.ov_lbl.config(text=short, bg=bg)
         self.root.after(50, self.poll)
 
 
 def main():
     load_config()
+    i18n.set_lang(CONFIG["settings"].get("lang") or i18n.detect())
     root = tk.Tk()
     App(root)
     mouse_listener.start()

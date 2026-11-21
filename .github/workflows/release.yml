@@ -33,9 +33,11 @@ jobs:
           if gh release view "v$v" >/dev/null 2>&1; then
             echo "выпуск v$v уже есть"; echo "skip=1" >> "$GITHUB_OUTPUT"
           fi
-      - name: Тесты обновления
+      - name: Тесты обновления и перевода
         if: steps.v.outputs.skip != '1'
-        run: python tests/test_updater.py
+        run: |
+          python tests/test_updater.py
+          python tests/test_i18n.py
       - name: Выпуск
         if: steps.v.outputs.skip != '1'
         env:

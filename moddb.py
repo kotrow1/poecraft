@@ -9,6 +9,8 @@ import re
 import urllib.request
 from dataclasses import dataclass, field
 
+from i18n import t
+
 DATA_URL = "https://raw.githubusercontent.com/repoe-fork/repoe-fork.github.io/master/data/"
 DATA_FILES = {"mods.json": "mods.json",
               "base_items.json": "base_items.json",
@@ -33,7 +35,7 @@ def download_data(force=False, log=print):
         path = os.path.join(DATA_DIR, local)
         if os.path.exists(path) and not force:
             continue
-        log(f"Скачиваю {remote} ...")
+        log(t("Скачиваю {name} ...", name=remote))
         urllib.request.urlretrieve(DATA_URL + remote, path)
 
 
@@ -114,7 +116,7 @@ class Mod:
 class ModDB:
     def __init__(self, log=print):
         download_data(log=log)
-        log("Загружаю базу модов ...")
+        log(t("Загружаю базу модов ..."))
         with open(os.path.join(DATA_DIR, "mods.json"), encoding="utf-8") as f:
             self.mods = json.load(f)
         with open(os.path.join(DATA_DIR, "base_items.json"), encoding="utf-8") as f:
@@ -239,7 +241,7 @@ def parse_item_text(db, text):
             if best is None or len(b["name"]) > len(best[1]["name"]):
                 best = (k, b)
     if best is None:
-        raise ValueError("Не удалось определить базу предмета. Скопируй предмет через Ctrl+Alt+C.")
+        raise ValueError(t("Не удалось определить базу предмета. Скопируй предмет через Ctrl+Alt+C."))
     extra_tags, enchant = [], ""
     cluster = db.clusters.get(best[0])
     if cluster:                                     # кластер: пул нотаблов зависит от энчанта
@@ -251,7 +253,7 @@ def parse_item_text(db, text):
                 enchant = ench
                 break
         if not extra_tags:
-            raise ValueError("Не удалось распознать энчант кластера. Скопируй его через Ctrl+Alt+C.")
+            raise ValueError(t("Не удалось распознать энчант кластера. Скопируй его через Ctrl+Alt+C."))
     ctx = build_context(db, best[1], ilvl, influences, extra_tags)
     ctx.enchant = enchant
     return ctx
@@ -343,11 +345,11 @@ class Match:
 
     def describe(self):
         tiers = sorted({m.tier for m in self.candidates})
-        t = "/".join(f"T{x}" for x in tiers)
+        tier_txt = "/".join(f"T{x}" for x in tiers)
         m = self.best
         el = " ELEVATED" if m.elevated else ""
         inf = f" [{m.influence}]" if m.influence else ""
-        return f"{m.gen[0].upper()} {t}{inf}{el}: " + " | ".join(self.lines)
+        return f"{m.gen[0].upper()} {tier_txt}{inf}{el}: " + " | ".join(self.lines)
 
 
 def _values_fit(tpl, nums):

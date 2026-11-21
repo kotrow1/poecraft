@@ -14,7 +14,9 @@ import urllib.error
 import urllib.request
 import zipfile
 
-VERSION = "1.1.0"
+from i18n import t
+
+VERSION = "1.2.0"
 REPO = "kotrow1/poecraft"
 API_LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
 RELEASES_URL = f"https://github.com/{REPO}/releases"
@@ -22,7 +24,7 @@ ISSUES_URL = f"https://github.com/{REPO}/issues/new"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 # что в папке программы обновление не трогает: пользовательское и служебное
 KEEP = {"data", "config.json", "backup", ".git", "__pycache__"}
-REQUIRED = ("app.py", "moddb.py", "updater.py")    # без них архив — не наш выпуск
+REQUIRED = ("app.py", "moddb.py", "updater.py", "i18n.py")    # без них архив — не наш выпуск
 HEADERS = {"User-Agent": "poecraft-updater", "Accept": "application/vnd.github+json"}
 MAX_ZIP = 20 * 1024 * 1024
 
@@ -47,12 +49,12 @@ def _get(url, timeout):
             return r.read(MAX_ZIP + 1)
     except urllib.error.HTTPError as e:
         if e.code == 404:
-            raise UpdateError("выпусков не найдено (репозиторий закрыт или выпусков ещё нет)")
+            raise UpdateError(t("выпусков не найдено (репозиторий закрыт или выпусков ещё нет)"))
         if e.code == 403:
-            raise UpdateError("GitHub временно ограничил запросы, попробуй позже")
-        raise UpdateError(f"GitHub ответил {e.code}")
+            raise UpdateError(t("GitHub временно ограничил запросы, попробуй позже"))
+        raise UpdateError(t("GitHub ответил {code}", code=e.code))
     except (urllib.error.URLError, OSError) as e:
-        raise UpdateError(f"нет связи с GitHub ({getattr(e, 'reason', e)})")
+        raise UpdateError(t("нет связи с GitHub ({e})", e=getattr(e, "reason", e)))
 
 
 def check(timeout=10):
@@ -60,10 +62,10 @@ def check(timeout=10):
     try:
         data = json.loads(_get(API_LATEST, timeout))
     except ValueError:
-        raise UpdateError("непонятный ответ GitHub")
+        raise UpdateError(t("непонятный ответ GitHub"))
     tag = data.get("tag_name") or ""
     if not tag or not data.get("zipball_url"):
-        raise UpdateError("в выпуске нет тега или архива")
+        raise UpdateError(t("в выпуске нет тега или архива"))
     return {"version": tag.lstrip("vV"), "tag": tag, "notes": data.get("body") or "",
             "url": data.get("html_url") or RELEASES_URL, "zip": data["zipball_url"]}
 
@@ -93,11 +95,11 @@ def install_zip(blob, app_dir=APP_DIR, backup_name="prev"):
     try:
         zf = zipfile.ZipFile(io.BytesIO(blob))
     except zipfile.BadZipFile:
-        raise UpdateError("скачанный архив повреждён")
+        raise UpdateError(t("скачанный архив повреждён"))
     files = _members(zf)
     missing = [f for f in REQUIRED if f not in files]
     if missing:
-        raise UpdateError("в архиве нет " + ", ".join(missing))
+        raise UpdateError(t("в архиве нет {files}", files=", ".join(missing)))
     root = os.path.realpath(app_dir)
     backup = os.path.join(root, "backup", backup_name)
     shutil.rmtree(backup, ignore_errors=True)
@@ -125,8 +127,8 @@ def install_zip(blob, app_dir=APP_DIR, backup_name="prev"):
 
 def install(info, app_dir=APP_DIR, timeout=60):
     if is_git_checkout(app_dir):
-        raise UpdateError("папка программы — клон git, обнови через git pull")
+        raise UpdateError(t("папка программы — клон git, обнови через git pull"))
     blob = _get(info["zip"], timeout)
     if len(blob) > MAX_ZIP:
-        raise UpdateError("архив выпуска слишком большой")
+        raise UpdateError(t("архив выпуска слишком большой"))
     return install_zip(blob, app_dir, backup_name=VERSION)
